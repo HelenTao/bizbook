@@ -11,7 +11,7 @@
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{background:#F9FAFB;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
 #root{max-width:480px;margin:0 auto;min-height:100vh;background:#fff}
-input,select{font-family:inherit;font-size:14px;background:#F3F4F6;color:#111827;border:none;border-radius:12px;padding:10px 14px;width:100%;outline:none;-webkit-appearance:none;appearance:none}
+input,select{font-family:inherit;font-size:14px;background:#F3F4F6;color:#111827;border:none;border-radius:12px;padding:10px 14px;width:100%;outline:none;-webkit-appearance:none}
 input:focus,select:focus{box-shadow:0 0 0 2px rgba(192,132,252,0.4)}
 button{font-family:inherit;cursor:pointer;border:none}
 .pill{display:flex;background:#F3F4F6;border-radius:20px;padding:3px;gap:2px}
@@ -24,7 +24,6 @@ button{font-family:inherit;cursor:pointer;border:none}
 .sec{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#9CA3AF;margin-bottom:10px}
 .lbl{font-size:12px;color:#6B7280;margin-bottom:5px;font-weight:500}
 .ibtn{background:none;color:#9CA3AF;padding:4px 8px;font-size:15px;border-radius:8px;border:none;cursor:pointer}
-.ibtn:hover{color:#A855F7;background:#F3E8FF}
 .ghost{border:1.5px solid #E9D5FF;border-radius:12px;padding:9px 16px;background:transparent;color:#A855F7;font-size:13px;font-weight:500;cursor:pointer}
 </style>
 </head>
@@ -32,739 +31,656 @@ button{font-family:inherit;cursor:pointer;border:none}
 <div id="root"><p style="padding:40px;text-align:center;color:#9CA3AF">加载中...</p></div>
 <script>
 (function() {
-function waitForDeps(cb) {
-  if (window.React && window.ReactDOM) { cb(); return; }
-  var t = 0;
-  var iv = setInterval(function() {
-    t++;
-    if (window.React && window.ReactDOM) { clearInterval(iv); cb(); }
-    else if (t > 50) { clearInterval(iv); document.getElementById('root').innerHTML = '<p style="padding:40px;color:red">依赖库加载失败，请刷新页面</p>'; }
-  }, 100);
-}
+  "use strict";
 
-waitForDeps(function() {
-var e = React.createElement;
-var useState = React.useState;
-var useReducer = React.useReducer;
-var useMemo = React.useMemo;
-var useEffect = React.useEffect;
-var RC = window.Recharts || {};
-var hasCharts = !!(RC.ResponsiveContainer && RC.BarChart && RC.PieChart);
-
-var PALETTE = ["#C084FC","#F472B6","#FB923C","#34D399","#60A5FA","#FBBF24","#A78BFA","#F87171"];
-var G = "linear-gradient(135deg,#C084FC,#F472B6)";
-var G2 = "linear-gradient(135deg,#818CF8,#C084FC)";
-
-function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
-function today() { return new Date().toISOString().slice(0,10); }
-function thisMonth() { return new Date().toISOString().slice(0,7); }
-function genMonths() {
-  var list = [], now = new Date();
-  for (var i = -6; i <= 6; i++) {
-    var d = new Date(now.getFullYear(), now.getMonth()+i, 1);
-    list.push(d.toISOString().slice(0,7));
-  }
-  return list;
-}
-var ALL_MONTHS = genMonths();
-function fmtN(n,d) { d=d||2; return isNaN(Number(n))?"0.00":Number(n).toFixed(d); }
-function fmtC(n,cur) { return cur==="AUD"?"A$"+fmtN(n):"¥"+fmtN(n); }
-function toBase(amt,cur,base,rate) {
-  var a=Number(amt)||0;
-  if(cur===base) return a;
-  if(base==="CNY"&&cur==="AUD") return a*(Number(rate)||1);
-  if(base==="AUD"&&cur==="CNY") return a/(Number(rate)||1);
-  return a;
-}
-function resBase(entry,rate,mode,base) {
-  if(mode==="historical") return entry.amountBase||0;
-  return toBase(entry.amount,entry.currency,base,rate);
-}
-
-var SK="bizbook_v5";
-function loadSt(){try{var s=localStorage.getItem(SK);return s?JSON.parse(s):null;}catch(err){return null;}}
-function saveSt(s){try{localStorage.setItem(SK,JSON.stringify(s));}catch(err){}}
-
-function calcBal(entries,partners,rate,mode,base) {
-  var op=entries.filter(function(x){return x.type!=="capital"&&x.type!=="settlement";});
-  var inc=op.filter(function(x){return x.type==="income";}).reduce(function(s,x){return s+resBase(x,rate,mode,base);},0);
-  var exp=op.filter(function(x){return x.type==="expense";}).reduce(function(s,x){return s+resBase(x,rate,mode,base);},0);
-  var profit=inc-exp;
-  var held={};
-  partners.forEach(function(p){held[p.id]=0;});
-  op.forEach(function(x){
-    if(!x.paidBy||!held.hasOwnProperty(x.paidBy))return;
-    var b=resBase(x,rate,mode,base);
-    if(x.type==="income")held[x.paidBy]+=b;
-    if(x.type==="expense")held[x.paidBy]-=b;
-  });
-  entries.filter(function(x){return x.type==="capital"&&(x.capitalFlow||"pool")==="pool";}).forEach(function(x){
-    if(!x.paidBy||!held.hasOwnProperty(x.paidBy))return;
-    held[x.paidBy]-=resBase(x,rate,mode,base);
-  });
-  entries.filter(function(x){return x.type==="settlement";}).forEach(function(x){
-    if(!x.fromId||!x.toId)return;
-    var b=resBase(x,rate,mode,base);
-    if(held.hasOwnProperty(x.fromId))held[x.fromId]+=b;
-    if(held.hasOwnProperty(x.toId))held[x.toId]-=b;
-  });
-  var bal={};
-  partners.forEach(function(p){bal[p.id]=(profit*(p.ratio/100))-held[p.id];});
-  return bal;
-}
-
-function getCapitalLoans(entries,partners,rate,mode,base) {
-  var loans={};
-  entries.filter(function(x){return x.type==="capital"&&x.capitalFlow==="partner"&&x.paidBy&&x.capitalTo&&x.capitalTo!==x.paidBy;}).forEach(function(x){
-    var b=resBase(x,rate,mode,base);
-    var key=x.capitalTo+"_"+x.paidBy;
-    loans[key]=(loans[key]||0)+b;
-  });
-  var result=[];
-  var keys=Object.keys(loans);
-  for(var i=0;i<keys.length;i++){
-    var key=keys[i];
-    var amt=loans[key];
-    if(amt<=0.005)continue;
-    var parts=key.split("_");
-    var borrowerId=parts[0], lenderId=parts[1];
-    var fromName="?", toName="?";
-    for(var j=0;j<partners.length;j++){
-      if(partners[j].id===borrowerId)fromName=partners[j].name;
-      if(partners[j].id===lenderId)toName=partners[j].name;
+  function init() {
+    if (!window.React || !window.ReactDOM) {
+      document.getElementById("root").innerHTML = "<p style='padding:40px;color:red'>React加载失败，请刷新</p>";
+      return;
     }
-    result.push({from:borrowerId,fromName:fromName,to:lenderId,toName:toName,amount:amt,isLoan:true});
-  }
-  return result;
-}
 
-function minTr(bal,partners) {
-  var arr=partners.map(function(p){return{id:p.id,name:p.name,bal:bal[p.id]||0};});
-  arr.sort(function(a,b){return a.bal-b.bal;});
-  var tr=[],lo=0,hi=arr.length-1;
-  var a=arr.map(function(x){return{id:x.id,name:x.name,bal:x.bal};});
-  while(lo<hi){
-    var d=a[lo],c=a[hi];
-    if(Math.abs(d.bal)<0.005){lo++;continue;}
-    if(Math.abs(c.bal)<0.005){hi--;continue;}
-    var amt=Math.min(-d.bal,c.bal);
-    if(amt>0.005)tr.push({from:d.id,fromName:d.name,to:c.id,toName:c.name,amount:amt});
-    d.bal+=amt;c.bal-=amt;
-    if(Math.abs(d.bal)<0.005)lo++;
-    if(Math.abs(c.bal)<0.005)hi--;
-  }
-  return tr;
-}
+    var h = React.createElement;
+    var useState = React.useState;
+    var useReducer = React.useReducer;
+    var useMemo = React.useMemo;
+    var useEffect = React.useEffect;
+    var RC = window.Recharts || {};
+    var hasCharts = !!(RC.ResponsiveContainer && RC.BarChart && RC.PieChart);
 
-function mergeTransfers(profitTrs,loanTrs,partners) {
-  var net={};
-  partners.forEach(function(p){net[p.id]=0;});
-  profitTrs.forEach(function(t){net[t.from]-=t.amount;net[t.to]+=t.amount;});
-  loanTrs.forEach(function(t){net[t.from]-=t.amount;net[t.to]+=t.amount;});
-  var arr=partners.map(function(p){return{id:p.id,name:p.name,bal:net[p.id]||0};});
-  arr.sort(function(a,b){return a.bal-b.bal;});
-  var tr=[],lo=0,hi=arr.length-1;
-  var a=arr.map(function(x){return{id:x.id,name:x.name,bal:x.bal};});
-  while(lo<hi){
-    var d=a[lo],c=a[hi];
-    if(Math.abs(d.bal)<0.005){lo++;continue;}
-    if(Math.abs(c.bal)<0.005){hi--;continue;}
-    var amt=Math.min(-d.bal,c.bal);
-    if(amt>0.005)tr.push({from:d.id,fromName:d.name,to:c.id,toName:c.name,amount:amt});
-    d.bal+=amt;c.bal-=amt;
-    if(Math.abs(d.bal)<0.005)lo++;
-    if(Math.abs(c.bal)<0.005)hi--;
-  }
-  return tr;
-}
+    var PAL = ["#C084FC","#F472B6","#FB923C","#34D399","#60A5FA","#FBBF24","#A78BFA","#F87171"];
+    var G = "linear-gradient(135deg,#C084FC,#F472B6)";
+    var G2 = "linear-gradient(135deg,#818CF8,#C084FC)";
+    var SK = "bizbook_v6";
 
-function initApp(saved) {
-  var base={setup:null,month:thisMonth(),tab:"dashboard",rateMode:"historical",entries:[],settlements:[],confirmDel:null,showForm:null,editingEntry:null,showSettle:false,showMerge:false};
-  if(!saved)return base;
-  return Object.assign({},base,saved,{confirmDel:null,showForm:null,editingEntry:null,showSettle:false,showMerge:false});
-}
-
-function reducer(s,a) {
-  var n;
-  switch(a.type){
-    case "SETUP_DONE": n=Object.assign({},s,{setup:a.setup,tab:"dashboard",showForm:null,editingEntry:null});break;
-    case "SET_TAB": n=Object.assign({},s,{tab:a.v,showForm:null,editingEntry:null,showSettle:false,showMerge:false});break;
-    case "SET_MONTH": n=Object.assign({},s,{month:a.v});break;
-    case "SET_RATE_MODE": n=Object.assign({},s,{rateMode:a.v});break;
-    case "UPDATE_SETUP": n=Object.assign({},s,{setup:a.setup});break;
-    case "SHOW_FORM": n=Object.assign({},s,{showForm:a.v,editingEntry:null,showSettle:false,showMerge:false});break;
-    case "EDIT_ENTRY": n=Object.assign({},s,{editingEntry:a.entry,showForm:a.entry.type,showSettle:false,showMerge:false});break;
-    case "ADD_ENTRY": n=Object.assign({},s,{entries:s.entries.concat([Object.assign({},a.entry,{id:uid()})]),showForm:null,editingEntry:null});break;
-    case "UPDATE_ENTRY": n=Object.assign({},s,{entries:s.entries.map(function(x){return x.id===a.entry.id?a.entry:x;}),showForm:null,editingEntry:null});break;
-    case "DEL_ENTRY": n=Object.assign({},s,{entries:s.entries.filter(function(x){return x.id!==a.id;}),confirmDel:null});break;
-    case "ADD_SETTLEMENT": n=Object.assign({},s,{settlements:s.settlements.concat([Object.assign({},a.settlement,{id:uid()})]),entries:s.entries.concat(a.se),showSettle:false,showMerge:false});break;
-    case "DEL_SETTLEMENT": {
-      var lk=(s.settlements.find(function(x){return x.id===a.id;})||{}).linkedEntryIds||[];
-      n=Object.assign({},s,{settlements:s.settlements.filter(function(x){return x.id!==a.id;}),entries:s.entries.filter(function(x){return lk.indexOf(x.id)===-1;}),confirmDel:null});break;
+    function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2,5); }
+    function tod() { return new Date().toISOString().slice(0,10); }
+    function tmn() { return new Date().toISOString().slice(0,7); }
+    function genM() {
+      var r=[], now=new Date();
+      for(var i=-6;i<=6;i++){var d=new Date(now.getFullYear(),now.getMonth()+i,1);r.push(d.toISOString().slice(0,7));}
+      return r;
     }
-    case "CONFIRM_DEL": n=Object.assign({},s,{confirmDel:a.payload});break;
-    case "CANCEL_DEL": n=Object.assign({},s,{confirmDel:null});break;
-    case "RESET": localStorage.removeItem(SK);return initApp(null);
-    case "SHOW_SETTLE": n=Object.assign({},s,{showSettle:a.v,showForm:null,editingEntry:null,showMerge:false});break;
-    case "SHOW_MERGE": n=Object.assign({},s,{showMerge:a.v,showForm:null,editingEntry:null,showSettle:false});break;
-    default: return s;
-  }
-  saveSt(n);return n;
-}
-
-// ── UI helpers ────────────────────────────────────────────────────────────────
-function div(style) {
-  var children=[];
-  for(var i=1;i<arguments.length;i++){if(arguments[i]!==null&&arguments[i]!==undefined&&arguments[i]!==false)children.push(arguments[i]);}
-  return e("div",{style:style},children);
-}
-function Lbl(p){return e("p",{className:"lbl"},p.t);}
-function Inp(p){return e("input",{type:p.type||"text",value:p.val,placeholder:p.ph||"",onChange:function(ev){p.set(ev.target.value);},style:p.style||{}});}
-function Sel(p){return e("select",{value:p.val,onChange:function(ev){p.set(ev.target.value);}},p.opts.map(function(o){return e("option",{key:o[0],value:o[0]},o[1]);}));}
-function CurToggle(p){return e("div",{className:"pill"},e("button",{className:p.val==="CNY"?"on":"",onClick:function(){p.set("CNY");}},"¥ CNY"),e("button",{className:p.val==="AUD"?"on":"",onClick:function(){p.set("AUD");}},"A$ AUD"));}
-function RateToggle(p){return e("div",{className:"pill"},e("button",{className:p.val==="historical"?"on":"",onClick:function(){p.set("historical");}},"历史汇率"),e("button",{className:p.val==="current"?"on":"",onClick:function(){p.set("current");}},"当前汇率"));}
-function Avatar(p){
-  var sz=p.size||36,c=PALETTE[(p.idx||0)%PALETTE.length];
-  return div({width:sz,height:sz,borderRadius:"50%",background:c,display:"flex",alignItems:"center",justifyContent:"center",fontSize:sz*0.38,fontWeight:700,color:"#fff",flexShrink:0,boxShadow:"0 2px 8px "+c+"55"},((p.name||"?").slice(0,1).toUpperCase()));
-}
-function GBtn(p){return e("button",{onClick:p.onClick,style:Object.assign({background:p.g||G,color:"#fff",borderRadius:14,padding:"11px 20px",fontWeight:600,fontSize:14,boxShadow:"0 4px 14px rgba(192,132,252,0.3)"},p.style||{})},p.children);}
-function ConfirmDlg(p){
-  return div({position:"fixed",inset:0,background:"rgba(0,0,0,0.4)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:999,padding:"0 16px 32px"},
-    div({background:"#fff",borderRadius:24,padding:24,width:"100%",maxWidth:420},
-      e("p",{style:{fontSize:15,marginBottom:20,textAlign:"center"}},p.msg),
-      div({display:"flex",gap:10},
-        e("button",{className:"ghost",style:{flex:1},onClick:p.onCancel},"取消"),
-        e("button",{onClick:p.onOk,style:{flex:1,background:"linear-gradient(135deg,#F87171,#FB923C)",color:"#fff",borderRadius:12,padding:"10px",fontWeight:600,fontSize:14}},"确认")
-      )
-    )
-  );
-}
-
-// ── Setup ─────────────────────────────────────────────────────────────────────
-function Setup(p) {
-  var onDone=p.onDone,existing=p.existing;
-  var ss=useState(0);var step=ss[0];var setStep=ss[1];
-  var initP=existing&&existing.partners?existing.partners:[{id:uid(),name:"",ratio:50},{id:uid(),name:"",ratio:50}];
-  var ps=useState(initP);var partners=ps[0];var setPartners=ps[1];
-  var bs=useState(existing?existing.baseCurrency||"CNY":"CNY");var base=bs[0];var setBase=bs[1];
-  var rs=useState(String(existing?existing.rate||4.70:4.70));var rate=rs[0];var setRate=rs[1];
-  var ls=useState(null);var live=ls[0];var setLive=ls[1];
-  useEffect(function(){
-    fetch("https://api.frankfurter.app/latest?from=AUD&to=CNY")
-      .then(function(r){return r.json();})
-      .then(function(data){if(data&&data.rates&&data.rates.CNY)setLive(Number(data.rates.CNY).toFixed(4));})
-      .catch(function(){});
-  },[]);
-  var total=partners.reduce(function(s,p){return s+Number(p.ratio||0);},0);
-  function upP(id,f,v){setPartners(function(ps){return ps.map(function(p){return p.id===id?Object.assign({},p,(f==="name"?{name:v}:{ratio:v})):p;});});}
-  function resize(n){
-    var count=Math.min(8,Math.max(2,n));
-    var b=Math.floor(100/count),rem=100-b*(count-1);
-    var newP=[];
-    for(var i=0;i<count;i++)newP.push({id:(partners[i]&&partners[i].id)||uid(),name:(partners[i]&&partners[i].name)||"",ratio:i===count-1?rem:b});
-    setPartners(newP);
-  }
-  var ok=partners.every(function(p){return p.name.trim();})&&total===100;
-  function done(){onDone({partners:partners,baseCurrency:base,rate:Number(rate)||4.7});}
-  var nextStep=existing?1:2;
-  if(!existing&&step===0){
-    return div({minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"24px 20px",background:"#fff"},
-      div({width:72,height:72,borderRadius:22,background:G,display:"flex",alignItems:"center",justifyContent:"center",fontSize:34,margin:"0 auto 20px",boxShadow:"0 8px 24px rgba(192,132,252,0.4)"},"🤝"),
-      e("p",{style:{fontSize:26,fontWeight:700,marginBottom:8}},"合伙生意记账"),
-      e("p",{style:{fontSize:14,color:"#6B7280",marginBottom:32,lineHeight:1.6,textAlign:"center"}},"澳洲华人合伙小生意",e("br"),"多人分账 · 双币种 · 灵活结算"),
-      e(GBtn,{style:{width:"100%",padding:14,fontSize:15,borderRadius:16},onClick:function(){setStep(1);}},"开始设置")
-    );
-  }
-  if(step===(existing?0:1)){
-    return div({width:"100%",maxWidth:380,margin:"0 auto",padding:"20px 0"},
-      e("p",{style:{fontSize:20,fontWeight:700,marginBottom:4}},"合伙人"),
-      e("p",{style:{fontSize:13,color:"#6B7280",marginBottom:18}},"姓名和持股比例，合计需为100%"),
-      div({display:"flex",alignItems:"center",gap:12,marginBottom:16},
-        e("p",{style:{fontSize:13,color:"#6B7280"}},"人数"),
-        e("button",{className:"ghost",style:{padding:"4px 12px"},onClick:function(){resize(partners.length-1);}},"−"),
-        e("span",{style:{fontWeight:700,minWidth:20,textAlign:"center"}},partners.length),
-        e("button",{className:"ghost",style:{padding:"4px 12px"},onClick:function(){resize(partners.length+1);}},"+")),
-      partners.map(function(p,i){
-        return div({key:p.id,display:"flex",gap:10,marginBottom:10,alignItems:"center"},
-          e(Avatar,{name:p.name||String(i+1),idx:i,size:36}),
-          e("input",{value:p.name,placeholder:"合伙人"+(i+1),onChange:function(ev){upP(p.id,"name",ev.target.value);},style:{flex:2,padding:"10px 14px",borderRadius:12,border:"none",background:"#F3F4F6",fontSize:14}}),
-          e("input",{type:"number",value:p.ratio,onChange:function(ev){upP(p.id,"ratio",ev.target.value);},style:{width:60,padding:"10px 8px",borderRadius:12,border:"none",background:"#F3F4F6",fontSize:14,textAlign:"center"}}),
-          e("span",{style:{fontSize:13,color:"#6B7280"}},"%"));
-      }),
-      e("p",{style:{fontSize:12,color:total===100?"#10B981":"#F87171",marginTop:6,marginBottom:20,fontWeight:600}},"合计 "+total+"% "+(total===100?"✓":"（需等于100%）")),
-      div({display:"flex",gap:10},
-        !existing&&e("button",{className:"ghost",style:{flex:1},onClick:function(){setStep(0);}},"上一步"),
-        e(GBtn,{style:{flex:2,padding:12},onClick:function(){if(ok)setStep(nextStep);},g:ok?G:"linear-gradient(135deg,#D1D5DB,#9CA3AF)"},"下一步"))
-    );
-  }
-  return div({width:"100%",maxWidth:380,margin:"0 auto",padding:"20px 0"},
-    e("p",{style:{fontSize:20,fontWeight:700,marginBottom:4}},"货币 & 汇率"),
-    e("p",{style:{fontSize:13,color:"#6B7280",marginBottom:18}},"主要结算货币和默认汇率"),
-    div({marginBottom:16},
-      e(Lbl,{t:"主要结算货币"}),
-      div({display:"flex",gap:10},
-        e("button",{onClick:function(){setBase("CNY");},style:{flex:1,padding:"12px",borderRadius:14,background:base==="CNY"?G:"#F3F4F6",color:base==="CNY"?"#fff":"#6B7280",fontWeight:base==="CNY"?700:400,fontSize:14,boxShadow:base==="CNY"?"0 4px 12px rgba(192,132,252,0.3)":"none"}},"人民币 ¥"),
-        e("button",{onClick:function(){setBase("AUD");},style:{flex:1,padding:"12px",borderRadius:14,background:base==="AUD"?G:"#F3F4F6",color:base==="AUD"?"#fff":"#6B7280",fontWeight:base==="AUD"?700:400,fontSize:14,boxShadow:base==="AUD"?"0 4px 12px rgba(192,132,252,0.3)":"none"}},"澳币 A$"))),
-    div({marginBottom:20},
-      e(Lbl,{t:"默认汇率（1 AUD = ? CNY）"}),
-      live&&div({display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",background:"#F3E8FF",borderRadius:12,marginBottom:8},
-        e("span",{style:{fontSize:13,color:"#7C3AED",fontWeight:500}},"实时 1 AUD = "+live+" CNY"),
-        e("button",{className:"ghost",style:{padding:"4px 10px",fontSize:12},onClick:function(){setRate(live);}},"使用")),
-      e("input",{type:"number",value:rate,placeholder:"4.70",onChange:function(ev){setRate(ev.target.value);},style:{background:"#F3F4F6",border:"none",borderRadius:12,padding:"10px 14px",fontSize:14,width:"100%"}})),
-    div({display:"flex",gap:10},
-      e("button",{className:"ghost",style:{flex:1},onClick:function(){setStep(existing?0:1);}},"上一步"),
-      e(GBtn,{style:{flex:2,padding:12},onClick:done},existing?"保存":"开始使用"))
-  );
-}
-
-// ── EntryForm ──────────────────────────────────────────────────────────────────
-function EntryForm(p) {
-  var type=p.type,month=p.month,setup=p.setup,onAdd=p.onAdd,onCancel=p.onCancel,editing=p.editing,onUpdate=p.onUpdate;
-  var isI=type==="income",isC=type==="capital",ed=editing;
-  var ds=useState(ed?ed.date:month+"-01");var date=ds[0];var setDate=ds[1];
-  var as=useState(ed?String(ed.amount):"");var amt=as[0];var setAmt=as[1];
-  var cs=useState(ed?ed.currency:setup.baseCurrency);var cur=cs[0];var setCur=cs[1];
-  var rs=useState(String(ed?ed.rateAtEntry:setup.rate));var eRate=rs[0];var setERate=rs[1];
-  var cts=useState(ed?ed.category||"":"");var cat=cts[0];var setCat=cts[1];
-  var initPaidBy=ed?ed.paidBy:(setup.partners[0]?setup.partners[0].id:"");
-  var pbs=useState(initPaidBy);var paidBy=pbs[0];var setPaidBy=pbs[1];
-  var ns=useState(ed?ed.note||"":"");var note=ns[0];var setNote=ns[1];
-  var fls=useState(ed?ed.capitalFlow||"partner":"partner");var flow=fls[0];var setFlow=fls[1];
-  var initCapTo=ed?ed.capitalTo||"":"";
-  if(!initCapTo){
-    var others0=setup.partners.filter(function(p){return p.id!==initPaidBy;});
-    initCapTo=others0.length>0?others0[0].id:"";
-  }
-  var cps=useState(initCapTo);var capTo=cps[0];var setCapTo=cps[1];
-
-  var iCats=["销售收入","线上销售","退款回收","其他收入"];
-  var eCats=["进货","房租","人工","运费","水电","包装","营销","杂费"];
-  var rn=Number(eRate)||setup.rate;
-  var preview=amt&&cur!==setup.baseCurrency?toBase(amt,cur,setup.baseCurrency,rn):null;
-
-  function handleSetPaidBy(v){
-    setPaidBy(v);
-    if(capTo===v){
-      var oth=setup.partners.filter(function(p){return p.id!==v;});
-      if(oth.length>0)setCapTo(oth[0].id);
+    var MONTHS = genM();
+    function fn(n,d){d=d||2;return isNaN(+n)?"0.00":(+n).toFixed(d);}
+    function fc(n,c){return c==="AUD"?"A$"+fn(n):"¥"+fn(n);}
+    function tb(a,c,bc,r){
+      var v=+a||0;
+      if(c===bc)return v;
+      if(bc==="CNY"&&c==="AUD")return v*(+r||1);
+      if(bc==="AUD"&&c==="CNY")return v/(+r||1);
+      return v;
     }
-  }
-
-  function submit(){
-    if(!amt||!paidBy)return;
-    var sd=date.startsWith(month)?date:month+"-01";
-    var ab=toBase(amt,cur,setup.baseCurrency,rn);
-    var base2={date:sd,month:month,amount:Number(amt),currency:cur,amountBase:ab,rateAtEntry:rn,baseCurrencyAtEntry:setup.baseCurrency,category:cat||"其他",paidBy:paidBy,note:note};
-    var finalCapTo=capTo;
-    if(isC&&flow==="partner"&&(!finalCapTo||finalCapTo===paidBy)){
-      var oth2=setup.partners.filter(function(p){return p.id!==paidBy;});
-      finalCapTo=oth2.length>0?oth2[0].id:"";
+    function rb(e,r,m,bc){
+      if(m==="historical")return e.amountBase||0;
+      return tb(e.amount,e.currency,bc,r);
     }
-    var entry=isC?Object.assign({},base2,{type:"capital",capitalFlow:flow,capitalTo:flow==="partner"?finalCapTo:null}):Object.assign({},base2,{type:type});
-    if(editing){onUpdate(Object.assign({},editing,entry));}
-    else{onAdd(entry);setAmt("");setNote("");setCat("");}
-  }
 
-  var accent=isI?"#10B981":isC?"#F59E0B":"#F472B6";
-  var aLight=isI?"#D1FAE5":isC?"#FEF3C7":"#FCE7F3";
-  var title=editing?(isI?"编辑收入":isC?"编辑注资":"编辑支出"):(isI?"录入收入":isC?"录入注资":"录入支出");
+    function lsSave(s){try{localStorage.setItem(SK,JSON.stringify(s));}catch(x){}}
+    function lsLoad(){try{var s=localStorage.getItem(SK);return s?JSON.parse(s):null;}catch(x){return null;}}
 
-  var othersForCapTo=setup.partners.filter(function(p){return p.id!==paidBy;});
-  var safeCapTo=(capTo&&capTo!==paidBy)?capTo:(othersForCapTo.length>0?othersForCapTo[0].id:"");
+    function calcBal(entries,partners,rate,mode,bc) {
+      var op=entries.filter(function(x){return x.type!=="capital"&&x.type!=="settlement";});
+      var inc=0,exp=0;
+      op.forEach(function(x){if(x.type==="income")inc+=rb(x,rate,mode,bc);else exp+=rb(x,rate,mode,bc);});
+      var profit=inc-exp;
+      var held={};
+      partners.forEach(function(p){held[p.id]=0;});
+      op.forEach(function(x){
+        if(!x.paidBy||held[x.paidBy]===undefined)return;
+        var b=rb(x,rate,mode,bc);
+        if(x.type==="income")held[x.paidBy]+=b;
+        else held[x.paidBy]-=b;
+      });
+      entries.filter(function(x){return x.type==="capital"&&(x.capitalFlow||"pool")==="pool";}).forEach(function(x){
+        if(held[x.paidBy]!==undefined)held[x.paidBy]-=rb(x,rate,mode,bc);
+      });
+      entries.filter(function(x){return x.type==="settlement";}).forEach(function(x){
+        if(!x.fromId||!x.toId)return;
+        var b=rb(x,rate,mode,bc);
+        if(held[x.fromId]!==undefined)held[x.fromId]+=b;
+        if(held[x.toId]!==undefined)held[x.toId]-=b;
+      });
+      var bal={};
+      partners.forEach(function(p){bal[p.id]=(profit*(p.ratio/100))-held[p.id];});
+      return bal;
+    }
 
-  return div({background:"#fff",borderRadius:20,padding:18,marginBottom:14,boxShadow:"0 2px 16px rgba(0,0,0,0.07)"},
-    div({display:"flex",alignItems:"center",gap:10,marginBottom:16},
-      div({width:36,height:36,borderRadius:10,background:aLight,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18},isI?"💰":isC?"🏦":"🛍️"),
-      e("p",{style:{fontWeight:700,fontSize:15,color:accent}},title)),
-    div({display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12},
-      div({},e(Lbl,{t:"日期"}),e(Inp,{val:date,set:setDate,type:"date"})),
-      div({},e(Lbl,{t:"货币"}),e(CurToggle,{val:cur,set:setCur}))),
-    div({marginBottom:12},e(Lbl,{t:"金额 ("+(cur==="CNY"?"¥":"A$")+")"}),e(Inp,{val:amt,set:setAmt,type:"number",ph:"0.00"})),
-    div({background:"#F3E8FF",borderRadius:14,padding:12,marginBottom:12},
-      e(Lbl,{t:"本笔汇率（1 AUD = ? CNY）"}),
-      div({display:"flex",gap:8,alignItems:"center"},
-        e("input",{type:"number",value:eRate,placeholder:String(setup.rate),onChange:function(ev){setERate(ev.target.value);},style:{flex:1,padding:"9px 12px",borderRadius:10,border:"none",background:"#fff",fontSize:14}}),
-        e("button",{onClick:function(){setERate(String(setup.rate));},style:{background:"#C084FC",color:"#fff",borderRadius:10,padding:"9px 12px",fontSize:12,fontWeight:600,whiteSpace:"nowrap"}},"默认")),
-      preview?e("p",{style:{fontSize:11,color:"#7C3AED",marginTop:6}},"≈ "+fmtC(preview,setup.baseCurrency)):null),
-    !isC&&div({marginBottom:12},
-      e(Lbl,{t:"分类"}),
-      div({display:"flex",flexWrap:"wrap",gap:6,marginBottom:8},(isI?iCats:eCats).map(function(c){return e("span",{key:c,className:"chip"+(cat===c?" on":""),onClick:function(){setCat(cat===c?"":c);}},c);})),
-      e(Inp,{val:cat,set:setCat,ph:"自定义分类..."})),
-    isC&&div({marginBottom:12},
-      e(Lbl,{t:"资金流向"}),
-      div({display:"flex",flexDirection:"column",gap:6,marginBottom:10},
-        [["partner","👤 转给另一合伙人"],["pool","🏦 进入公账"],["self","💼 自持备用金"]].map(function(item){
-          return e("button",{key:item[0],onClick:function(){setFlow(item[0]);},style:{padding:"10px 14px",textAlign:"left",borderRadius:12,background:flow===item[0]?"#FEF3C7":"#F3F4F6",color:flow===item[0]?"#92400E":"#6B7280",fontSize:13,fontWeight:flow===item[0]?600:400,border:flow===item[0]?"2px solid #F59E0B":"2px solid transparent"}},item[1]);
-        })),
-      flow==="partner"&&div({},e(Lbl,{t:"转给谁"}),e(Sel,{val:safeCapTo,set:setCapTo,opts:othersForCapTo.map(function(p){return[p.id,p.name];})}))
-    ),
-    div({marginBottom:12},e(Lbl,{t:isC?"注资人":isI?"收款人":"付款人"}),e(Sel,{val:paidBy,set:handleSetPaidBy,opts:setup.partners.map(function(p){return[p.id,p.name];})})),
-    div({marginBottom:16},e(Lbl,{t:"备注"}),e(Inp,{val:note,set:setNote,ph:"可选"})),
-    div({display:"flex",gap:10},
-      e(GBtn,{style:{flex:2,padding:11},onClick:submit},editing?"保存修改":"确认添加"),
-      e("button",{className:"ghost",style:{flex:1},onClick:onCancel},"取消"))
-  );
-}
+    function getLoans(entries,partners,rate,mode,bc) {
+      var loans={};
+      entries.filter(function(x){return x.type==="capital"&&x.capitalFlow==="partner"&&x.paidBy&&x.capitalTo&&x.capitalTo!==x.paidBy;}).forEach(function(x){
+        var k=x.capitalTo+"_"+x.paidBy;
+        loans[k]=(loans[k]||0)+rb(x,rate,mode,bc);
+      });
+      var res=[];
+      Object.keys(loans).forEach(function(k){
+        var amt=loans[k];
+        if(amt<=0.005)return;
+        var p=k.split("_"), bid=p[0], lid=p[1];
+        var bn=partners.find(function(x){return x.id===bid;});
+        var ln=partners.find(function(x){return x.id===lid;});
+        res.push({from:bid,fromName:bn?bn.name:"?",to:lid,toName:ln?ln.name:"?",amount:amt,isLoan:true});
+      });
+      return res;
+    }
 
-// ── SettleForm ─────────────────────────────────────────────────────────────────
-function SettleForm(p) {
-  var allEntries=p.allEntries,setup=p.setup,isMulti=p.isMulti,defaultMonths=p.defaultMonths,onAdd=p.onAdd,onCancel=p.onCancel,rate=p.rate,rateMode=p.rateMode;
-  var candidates=ALL_MONTHS.filter(function(m){return m<=thisMonth()&&allEntries.some(function(x){return x.month===m&&x.type!=="settlement";});});
-  var smS=useState(isMulti?candidates.slice():(defaultMonths||[]));var selM=smS[0];var setSelM=smS[1];
-  var dtS=useState(today());var date=dtS[0];var setDate=dtS[1];
-  var ntS=useState("");var note=ntS[0];var setNote=ntS[1];
-  var cuS=useState({});var custom=cuS[0];var setCustom=cuS[1];
+    function minTr(bal,partners) {
+      var arr=partners.map(function(p){return{id:p.id,name:p.name,b:bal[p.id]||0};}).sort(function(a,b){return a.b-b.b;});
+      var tr=[],lo=0,hi=arr.length-1;
+      while(lo<hi){
+        if(Math.abs(arr[lo].b)<0.005){lo++;continue;}
+        if(Math.abs(arr[hi].b)<0.005){hi--;continue;}
+        var a=Math.min(-arr[lo].b,arr[hi].b);
+        if(a>0.005)tr.push({from:arr[lo].id,fromName:arr[lo].name,to:arr[hi].id,toName:arr[hi].name,amount:a});
+        arr[lo].b+=a;arr[hi].b-=a;
+        if(Math.abs(arr[lo].b)<0.005)lo++;
+        if(Math.abs(arr[hi].b)<0.005)hi--;
+      }
+      return tr;
+    }
 
-  var relE=allEntries.filter(function(x){return selM.indexOf(x.month)!==-1;});
-  var bal=calcBal(relE,setup.partners,rate,rateMode,setup.baseCurrency);
-  var profitTrs=minTr(bal,setup.partners);
-  var loanTrs=getCapitalLoans(relE,setup.partners,rate,rateMode,setup.baseCurrency);
-  var trs=mergeTransfers(profitTrs,loanTrs,setup.partners);
+    function mergeTr(ptrs,ltrs,partners) {
+      var net={};
+      partners.forEach(function(p){net[p.id]=0;});
+      ptrs.concat(ltrs).forEach(function(t){net[t.from]-=t.amount;net[t.to]+=t.amount;});
+      return minTr(net,partners);
+    }
 
-  function toggle(m){setSelM(function(prev){return prev.indexOf(m)!==-1?prev.filter(function(x){return x!==m;}):prev.concat([m]);});}
-  function fa(key,sug){var r=custom[key];if(r===undefined||r==="")return sug;var n=Number(r);return(isNaN(n)||n<0)?sug:n;}
-  function submit(){
-    if(!selM.length)return;
-    var lids=[];
-    var se=trs.map(function(t){
-      var key=t.from+t.to,amt=fa(key,t.amount),eid=uid();
-      lids.push(eid);
-      return{id:eid,date:date,month:selM[selM.length-1],type:"settlement",amount:amt,currency:setup.baseCurrency,amountBase:amt,rateAtEntry:rate,baseCurrencyAtEntry:setup.baseCurrency,fromId:t.from,fromName:t.fromName,toId:t.to,toName:t.toName,category:"结算",note:note,suggestedAmount:t.amount};
-    });
-    onAdd({months:selM.slice().sort(),date:date,transfers:se.map(function(x){return Object.assign({},x);}),note:note,rate:rate,linkedEntryIds:lids},se);
-  }
+    function initSt(saved) {
+      var def={setup:null,month:tmn(),tab:"dash",rateMode:"historical",entries:[],settlements:[],cd:null,sf:null,ee:null,ss:false,sm:false};
+      if(!saved)return def;
+      return Object.assign({},def,saved,{cd:null,sf:null,ee:null,ss:false,sm:false});
+    }
 
-  return div({background:"#fff",borderRadius:20,padding:18,marginBottom:14,boxShadow:"0 2px 16px rgba(0,0,0,0.07)"},
-    e("p",{style:{fontWeight:700,fontSize:15,color:"#7C3AED",marginBottom:14}},isMulti?"🔗 合并结算":"✅ 月度结算"),
-    div({marginBottom:12},
-      e(Lbl,{t:isMulti?"选择月份":"结算月份"}),
-      div({display:"flex",flexWrap:"wrap",gap:6},
-        candidates.map(function(m){return e("span",{key:m,className:"chip"+(selM.indexOf(m)!==-1?" on":""),onClick:function(){toggle(m);}},m);}),
-        !candidates.length&&e("p",{style:{fontSize:12,color:"#9CA3AF"}},"暂无可结算月份"))),
-    selM.length>0&&trs.length>0&&div({background:"#EDE9FE",borderRadius:14,padding:14,marginBottom:12},
-      e("p",{style:{fontSize:12,color:"#7C3AED",fontWeight:700,marginBottom:10}},"💸 最终转账方案"),
-      trs.map(function(t){
-        var key=t.from+t.to;
-        return div({key:key,marginBottom:10},
-          div({display:"flex",justifyContent:"space-between",marginBottom:5},
-            e("span",{style:{fontSize:13,fontWeight:600}},t.fromName+" → "+t.toName),
-            e("span",{style:{fontSize:12,color:"#7C3AED"}},"建议 "+fmtC(t.amount,setup.baseCurrency))),
-          div({display:"flex",gap:8,alignItems:"center"},
-            e("input",{type:"number",placeholder:fmtN(t.amount),value:custom[key]!==undefined?custom[key]:"",onChange:function(ev){var v=ev.target.value;setCustom(function(prev){var n=Object.assign({},prev);n[key]=v;return n;});},style:{flex:1,padding:"8px 12px",borderRadius:10,border:"none",background:"#fff",fontSize:13}}),
-            e("span",{style:{fontSize:12,color:"#7C3AED",whiteSpace:"nowrap"}},setup.baseCurrency)),
-          e("p",{style:{fontSize:11,color:"#A78BFA",marginTop:4}},"实际："+fmtC(fa(key,t.amount),setup.baseCurrency)));
-      })),
-    selM.length>0&&trs.length===0&&div({textAlign:"center",padding:14,background:"#F3F4F6",borderRadius:14,marginBottom:12},e("p",{style:{fontSize:13,color:"#6B7280"}},"所选月份无未清余额 🎉")),
-    div({display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14},
-      div({},e(Lbl,{t:"结算日期"}),e(Inp,{val:date,set:setDate,type:"date"})),
-      div({},e(Lbl,{t:"备注"}),e(Inp,{val:note,set:setNote,ph:"可选"}))),
-    div({display:"flex",gap:10},
-      e(GBtn,{style:{flex:2,padding:11},onClick:submit},"确认结算"),
-      e("button",{className:"ghost",style:{flex:1},onClick:onCancel},"取消"))
-  );
-}
+    function red(s,a) {
+      var n;
+      switch(a.t){
+        case"DONE": n=Object.assign({},s,{setup:a.v,tab:"dash",sf:null,ee:null});break;
+        case"TAB":  n=Object.assign({},s,{tab:a.v,sf:null,ee:null,ss:false,sm:false});break;
+        case"MON":  n=Object.assign({},s,{month:a.v});break;
+        case"RM":   n=Object.assign({},s,{rateMode:a.v});break;
+        case"UPS":  n=Object.assign({},s,{setup:a.v});break;
+        case"SF":   n=Object.assign({},s,{sf:a.v,ee:null,ss:false,sm:false});break;
+        case"EE":   n=Object.assign({},s,{ee:a.v,sf:a.v.type,ss:false,sm:false});break;
+        case"AI":   n=Object.assign({},s,{entries:s.entries.concat([Object.assign({},a.v,{id:uid()})]),sf:null,ee:null});break;
+        case"UI":   n=Object.assign({},s,{entries:s.entries.map(function(x){return x.id===a.v.id?a.v:x;}),sf:null,ee:null});break;
+        case"DI":   n=Object.assign({},s,{entries:s.entries.filter(function(x){return x.id!==a.v;}),cd:null});break;
+        case"AS":   n=Object.assign({},s,{settlements:s.settlements.concat([Object.assign({},a.v,{id:uid()})]),entries:s.entries.concat(a.se),ss:false,sm:false});break;
+        case"DS":{var lk=(s.settlements.find(function(x){return x.id===a.v;})||{}).linkedEntryIds||[];n=Object.assign({},s,{settlements:s.settlements.filter(function(x){return x.id!==a.v;}),entries:s.entries.filter(function(x){return lk.indexOf(x.id)===-1;}),cd:null});break;}
+        case"CD":   n=Object.assign({},s,{cd:a.v});break;
+        case"CC":   n=Object.assign({},s,{cd:null});break;
+        case"RESET":localStorage.removeItem(SK);return initSt(null);
+        case"SS":   n=Object.assign({},s,{ss:a.v,sf:null,ee:null,sm:false});break;
+        case"SM":   n=Object.assign({},s,{sm:a.v,sf:null,ee:null,ss:false});break;
+        default:return s;
+      }
+      lsSave(n);return n;
+    }
 
-function QuickRate(p){
-  var setup=p.setup,dp=p.dp;
-  var rs=useState(String(setup.rate));var r=rs[0];var setR=rs[1];
-  return div({display:"flex",gap:8},
-    e("input",{type:"number",value:r,placeholder:String(setup.rate),onChange:function(ev){setR(ev.target.value);},style:{flex:1,padding:"10px 14px",borderRadius:12,border:"none",background:"#F3F4F6",fontSize:14}}),
-    e(GBtn,{onClick:function(){var n=Number(r);if(n>0)dp({type:"UPDATE_SETUP",setup:Object.assign({},setup,{rate:n});});}},"更新"));
-}
+    // ── tiny helpers ──────────────────────────────────────────────────────────
+    function dv(style){
+      var c=[];
+      for(var i=1;i<arguments.length;i++){if(arguments[i]!==null&&arguments[i]!==undefined&&arguments[i]!==false)c.push(arguments[i]);}
+      return h("div",{style:style},c);
+    }
+    function Lbl(p){return h("p",{className:"lbl"},p.t);}
+    function Inp(p){return h("input",{type:p.type||"text",value:p.val,placeholder:p.ph||"",onChange:function(e){p.set(e.target.value);},style:p.sx||{}});}
+    function Sel(p){return h("select",{value:p.val,onChange:function(e){p.set(e.target.value);}},p.opts.map(function(o){return h("option",{key:o[0],value:o[0]},o[1]);}));}
+    function Rt(p){return dv({display:"flex",background:"#F3F4F6",borderRadius:20,padding:3,gap:2},h("button",{className:p.val==="historical"?"pill on":"pill",style:{borderRadius:16,padding:"5px 12px",fontSize:12,background:p.val==="historical"?"#fff":"transparent",color:p.val==="historical"?"#A855F7":"#6B7280",fontWeight:p.val==="historical"?600:400,border:"none",cursor:"pointer"},onClick:function(){p.set("historical");}},"历史汇率"),h("button",{className:p.val==="current"?"pill on":"pill",style:{borderRadius:16,padding:"5px 12px",fontSize:12,background:p.val==="current"?"#fff":"transparent",color:p.val==="current"?"#A855F7":"#6B7280",fontWeight:p.val==="current"?600:400,border:"none",cursor:"pointer"},onClick:function(){p.set("current");}},"当前汇率"));}
+    function Ct(p){return dv({display:"flex",background:"#F3F4F6",borderRadius:20,padding:3,gap:2},h("button",{style:{borderRadius:16,padding:"5px 12px",fontSize:12,background:p.val==="CNY"?"#fff":"transparent",color:p.val==="CNY"?"#A855F7":"#6B7280",fontWeight:p.val==="CNY"?600:400,border:"none",cursor:"pointer"},onClick:function(){p.set("CNY");}},"¥ CNY"),h("button",{style:{borderRadius:16,padding:"5px 12px",fontSize:12,background:p.val==="AUD"?"#fff":"transparent",color:p.val==="AUD"?"#A855F7":"#6B7280",fontWeight:p.val==="AUD"?600:400,border:"none",cursor:"pointer"},onClick:function(){p.set("AUD");}},"A$ AUD"));}
+    function Av(p){var sz=p.sz||36,c=PAL[(p.i||0)%PAL.length];return dv({width:sz,height:sz,borderRadius:"50%",background:c,display:"flex",alignItems:"center",justifyContent:"center",fontSize:sz*.38,fontWeight:700,color:"#fff",flexShrink:0,boxShadow:"0 2px 8px "+c+"55"},(p.n||"?").slice(0,1).toUpperCase());}
+    function GB(p){return h("button",{onClick:p.onClick,style:Object.assign({background:p.g||G,color:"#fff",borderRadius:14,padding:"11px 20px",fontWeight:600,fontSize:14,boxShadow:"0 4px 14px rgba(192,132,252,0.3)"},p.sx||{})},p.children);}
 
-// ── Main App ───────────────────────────────────────────────────────────────────
-function App(){
-  var saved=useMemo(function(){return loadSt();},[]);
-  var stDp=useReducer(reducer,saved,initApp);var st=stDp[0];var dp=stDp[1];
-  var liveS=useState(null);var live=liveS[0];var setLive=liveS[1];
+    function CDlg(p){
+      return dv({position:"fixed",inset:0,background:"rgba(0,0,0,0.4)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:999,padding:"0 16px 32px"},
+        dv({background:"#fff",borderRadius:24,padding:24,width:"100%",maxWidth:420},
+          h("p",{style:{fontSize:15,marginBottom:20,textAlign:"center"}},p.msg),
+          dv({display:"flex",gap:10},
+            h("button",{className:"ghost",style:{flex:1},onClick:p.onCancel},"取消"),
+            h("button",{onClick:p.onOk,style:{flex:1,background:"linear-gradient(135deg,#F87171,#FB923C)",color:"#fff",borderRadius:12,padding:"10px",fontWeight:600,fontSize:14}},"确认"))));
+    }
 
-  useEffect(function(){
-    fetch("https://api.frankfurter.app/latest?from=AUD&to=CNY")
-      .then(function(r){return r.json();})
-      .then(function(data){if(data&&data.rates&&data.rates.CNY)setLive(Number(data.rates.CNY).toFixed(4));})
-      .catch(function(){});
-  },[]);
+    // ── Setup ─────────────────────────────────────────────────────────────────
+    function Setup(p) {
+      var s0=useState(0),step=s0[0],setStep=s0[1];
+      var ip=p.ex&&p.ex.partners?p.ex.partners:[{id:uid(),name:"",ratio:50},{id:uid(),name:"",ratio:50}];
+      var s1=useState(ip),parts=s1[0],setParts=s1[1];
+      var s2=useState(p.ex?p.ex.baseCurrency||"CNY":"CNY"),bc=s2[0],setBc=s2[1];
+      var s3=useState(String(p.ex?p.ex.rate||4.7:4.7)),rt=s3[0],setRt=s3[1];
+      var s4=useState(null),live=s4[0],setLive=s4[1];
+      useEffect(function(){
+        fetch("https://api.frankfurter.app/latest?from=AUD&to=CNY")
+          .then(function(r){return r.json();})
+          .then(function(d){if(d&&d.rates&&d.rates.CNY)setLive((+d.rates.CNY).toFixed(4));})
+          .catch(function(){});
+      },[]);
+      var tot=parts.reduce(function(s,x){return s+(+x.ratio||0);},0);
+      function up(id,f,v){setParts(function(ps){return ps.map(function(x){return x.id===id?Object.assign({},x,(f==="name"?{name:v}:{ratio:v})):x;});});}
+      function rsz(n){
+        var cnt=Math.min(8,Math.max(2,n));
+        var b=Math.floor(100/cnt),rem=100-b*(cnt-1);
+        setParts(Array.from({length:cnt},function(_,i){return{id:(parts[i]&&parts[i].id)||uid(),name:(parts[i]&&parts[i].name)||"",ratio:i===cnt-1?rem:b};}));
+      }
+      var ok=parts.every(function(x){return x.name.trim();})&&tot===100;
+      function done(){p.onDone({partners:parts,baseCurrency:bc,rate:+rt||4.7});}
+      var ns=p.ex?1:2;
 
-  var setup=st.setup,month=st.month,tab=st.tab,rateMode=st.rateMode,entries=st.entries,settlements=st.settlements,confirmDel=st.confirmDel,showForm=st.showForm,editingEntry=st.editingEntry,showSettle=st.showSettle,showMerge=st.showMerge;
+      if(!p.ex&&step===0){
+        return dv({minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"24px 20px",background:"#fff"},
+          dv({width:72,height:72,borderRadius:22,background:G,display:"flex",alignItems:"center",justifyContent:"center",fontSize:34,margin:"0 auto 20px",boxShadow:"0 8px 24px rgba(192,132,252,0.4)"},"🤝"),
+          h("p",{style:{fontSize:26,fontWeight:700,marginBottom:8}},"合伙生意记账"),
+          h("p",{style:{fontSize:14,color:"#6B7280",marginBottom:32,lineHeight:1.6,textAlign:"center"}},"澳洲华人合伙小生意",h("br"),"多人分账 · 双币种 · 灵活结算"),
+          h(GB,{sx:{width:"100%",padding:14,fontSize:15,borderRadius:16},onClick:function(){setStep(1);}},"开始设置"));
+      }
+      if(step===(p.ex?0:1)){
+        return dv({width:"100%",maxWidth:380,margin:"0 auto",padding:"20px 0"},
+          h("p",{style:{fontSize:20,fontWeight:700,marginBottom:4}},"合伙人"),
+          h("p",{style:{fontSize:13,color:"#6B7280",marginBottom:18}},"姓名和持股比例，合计需为100%"),
+          dv({display:"flex",alignItems:"center",gap:12,marginBottom:16},
+            h("p",{style:{fontSize:13,color:"#6B7280"}},"人数"),
+            h("button",{className:"ghost",style:{padding:"4px 12px"},onClick:function(){rsz(parts.length-1);}},"−"),
+            h("span",{style:{fontWeight:700,minWidth:20,textAlign:"center"}},parts.length),
+            h("button",{className:"ghost",style:{padding:"4px 12px"},onClick:function(){rsz(parts.length+1);}},"+")
+          ),
+          parts.map(function(x,i){
+            return dv({key:x.id,display:"flex",gap:10,marginBottom:10,alignItems:"center"},
+              h(Av,{n:x.name||String(i+1),i:i,sz:36}),
+              h("input",{value:x.name,placeholder:"合伙人"+(i+1),onChange:function(ev){up(x.id,"name",ev.target.value);},style:{flex:2,padding:"10px 14px",borderRadius:12,border:"none",background:"#F3F4F6",fontSize:14}}),
+              h("input",{type:"number",value:x.ratio,onChange:function(ev){up(x.id,"ratio",ev.target.value);},style:{width:60,padding:"10px 8px",borderRadius:12,border:"none",background:"#F3F4F6",fontSize:14,textAlign:"center"}}),
+              h("span",{style:{fontSize:13,color:"#6B7280"}},"%"));
+          }),
+          h("p",{style:{fontSize:12,color:tot===100?"#10B981":"#F87171",marginTop:6,marginBottom:20,fontWeight:600}},"合计 "+tot+"% "+(tot===100?"✓":"（需等于100%）")),
+          dv({display:"flex",gap:10},
+            !p.ex&&h("button",{className:"ghost",style:{flex:1},onClick:function(){setStep(0);}},"上一步"),
+            h(GB,{sx:{flex:2,padding:12},onClick:function(){if(ok)setStep(ns);},g:ok?G:"linear-gradient(135deg,#D1D5DB,#9CA3AF)"},"下一步")));
+      }
+      return dv({width:"100%",maxWidth:380,margin:"0 auto",padding:"20px 0"},
+        h("p",{style:{fontSize:20,fontWeight:700,marginBottom:4}},"货币 & 汇率"),
+        dv({marginBottom:16},
+          h(Lbl,{t:"主要结算货币"}),
+          dv({display:"flex",gap:10},
+            h("button",{onClick:function(){setBc("CNY");},style:{flex:1,padding:"12px",borderRadius:14,background:bc==="CNY"?G:"#F3F4F6",color:bc==="CNY"?"#fff":"#6B7280",fontWeight:bc==="CNY"?700:400,fontSize:14,boxShadow:bc==="CNY"?"0 4px 12px rgba(192,132,252,0.3)":"none"}},"人民币 ¥"),
+            h("button",{onClick:function(){setBc("AUD");},style:{flex:1,padding:"12px",borderRadius:14,background:bc==="AUD"?G:"#F3F4F6",color:bc==="AUD"?"#fff":"#6B7280",fontWeight:bc==="AUD"?700:400,fontSize:14,boxShadow:bc==="AUD"?"0 4px 12px rgba(192,132,252,0.3)":"none"}},"澳币 A$"))),
+        dv({marginBottom:20},
+          h(Lbl,{t:"默认汇率（1 AUD = ? CNY）"}),
+          live&&dv({display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",background:"#F3E8FF",borderRadius:12,marginBottom:8},
+            h("span",{style:{fontSize:13,color:"#7C3AED",fontWeight:500}},"实时 1 AUD = "+live+" CNY"),
+            h("button",{className:"ghost",style:{padding:"4px 10px",fontSize:12},onClick:function(){setRt(live);}},"使用")),
+          h("input",{type:"number",value:rt,placeholder:"4.70",onChange:function(e){setRt(e.target.value);},style:{background:"#F3F4F6",border:"none",borderRadius:12,padding:"10px 14px",fontSize:14,width:"100%"}})),
+        dv({display:"flex",gap:10},
+          h("button",{className:"ghost",style:{flex:1},onClick:function(){setStep(p.ex?0:1);}},"上一步"),
+          h(GB,{sx:{flex:2,padding:12},onClick:done},p.ex?"保存":"开始使用")));
+    }
 
-  // ALL hooks must be called before any conditional return
-  var cur=setup?setup.rate:4.7;
-  var base=setup?setup.baseCurrency:"CNY";
-  var mE=useMemo(function(){return setup?entries.filter(function(x){return x.month===month;}):[]; },[entries,month,setup]);
-  var mInc=useMemo(function(){return mE.filter(function(x){return x.type==="income";});},[mE]);
-  var mExp=useMemo(function(){return mE.filter(function(x){return x.type==="expense";});},[mE]);
-  var mCap=useMemo(function(){return mE.filter(function(x){return x.type==="capital";});},[mE]);
-  var tInc=useMemo(function(){return mInc.reduce(function(s,x){return s+resBase(x,cur,rateMode,base);},0);},[mInc,cur,rateMode,base]);
-  var tExp=useMemo(function(){return mExp.reduce(function(s,x){return s+resBase(x,cur,rateMode,base);},0);},[mExp,cur,rateMode,base]);
-  var net=tInc-tExp;
-  var bal=useMemo(function(){return setup?calcBal(mE,setup.partners,cur,rateMode,base):{};},[mE,setup,cur,rateMode,base]);
-  var profitTrs=useMemo(function(){return setup?minTr(bal,setup.partners):[];},[bal,setup]);
-  var loanTrs=useMemo(function(){return setup?getCapitalLoans(mE,setup.partners,cur,rateMode,base):[];},[mE,setup,cur,rateMode,base]);
-  var trs=useMemo(function(){return setup?mergeTransfers(profitTrs,loanTrs,setup.partners):[];},[profitTrs,loanTrs,setup]);
-  var settledMs=useMemo(function(){var s={};settlements.forEach(function(x){(x.months||[]).forEach(function(m){s[m]=true;});});return s;},[settlements]);
-  var catData=useMemo(function(){var c={};mExp.forEach(function(x){c[x.category]=(c[x.category]||0)+resBase(x,cur,rateMode,base);});return Object.keys(c).map(function(k){return{name:k,value:c[k]};});},[mExp,cur,rateMode,base]);
-  var barData=useMemo(function(){return ALL_MONTHS.map(function(m){var obj={m:m.slice(5)};obj["收入"]=entries.filter(function(x){return x.month===m&&x.type==="income";}).reduce(function(s,x){return s+resBase(x,cur,rateMode,base);},0);obj["支出"]=entries.filter(function(x){return x.month===m&&x.type==="expense";}).reduce(function(s,x){return s+resBase(x,cur,rateMode,base);},0);return obj;}).filter(function(x){return x["收入"]>0||x["支出"]>0;});},[entries,cur,rateMode,base]);
+    // ── EntryForm ──────────────────────────────────────────────────────────────
+    function EF(p) {
+      var isI=p.type==="income",isC=p.type==="capital",ed=p.editing;
+      var initPB=ed?ed.paidBy:(p.setup.partners[0]?p.setup.partners[0].id:"");
+      var initCT=ed?ed.capitalTo||"":"";
+      if(!initCT){var oth=p.setup.partners.filter(function(x){return x.id!==initPB;});initCT=oth.length?oth[0].id:"";}
+      var a=useState(ed?ed.date:p.month+"-01"),date=a[0],setDate=a[1];
+      var b=useState(ed?String(ed.amount):""),amt=b[0],setAmt=b[1];
+      var c=useState(ed?ed.currency:p.setup.baseCurrency),cur=c[0],setCur=c[1];
+      var d=useState(String(ed?ed.rateAtEntry:p.setup.rate)),er=d[0],setEr=d[1];
+      var e2=useState(ed?ed.category||"":""),cat=e2[0],setCat=e2[1];
+      var f=useState(initPB),pb=f[0],setPb=f[1];
+      var g=useState(ed?ed.note||"":""),note=g[0],setNote=g[1];
+      var i=useState(ed?ed.capitalFlow||"partner":"partner"),flow=i[0],setFlow=i[1];
+      var j=useState(initCT),ct=j[0],setCt=j[1];
 
-  // NOW safe to do conditional return
-  if(!setup){return e(Setup,{onDone:function(s){dp({type:"SETUP_DONE",setup:s});}});}
+      var iC=["销售收入","线上销售","退款回收","其他收入"];
+      var eC=["进货","房租","人工","运费","水电","包装","营销","杂费"];
+      var rn=+er||p.setup.rate;
+      var prev=amt&&cur!==p.setup.baseCurrency?tb(amt,cur,p.setup.baseCurrency,rn):null;
+      var oth2=p.setup.partners.filter(function(x){return x.id!==pb;});
+      var safeCt=(ct&&ct!==pb)?ct:(oth2.length?oth2[0].id:"");
 
-  var isSettled=!!settledMs[month],isFuture=month>thisMonth();
-  var TABS=[["dashboard","⬡","主页"],["record","✦","记录"],["settle","◎","结算"],["history","≡","历史"],["settings","⊙","设置"]];
-
-  return div({maxWidth:480,margin:"0 auto",paddingBottom:80,background:"#F9FAFB",minHeight:"100vh"},
-
-    confirmDel&&e(ConfirmDlg,{msg:confirmDel.label||"确认删除？",onCancel:function(){dp({type:"CANCEL_DEL"});},onOk:function(){
-      if(confirmDel.kind==="entry")dp({type:"DEL_ENTRY",id:confirmDel.id});
-      else if(confirmDel.kind==="settlement")dp({type:"DEL_SETTLEMENT",id:confirmDel.id});
-      else if(confirmDel.kind==="reset")dp({type:"RESET"});
-    }}),
-
-    div({background:"#fff",padding:"20px 18px 0",boxShadow:"0 1px 0 #F3F4F6"},
-      div({display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14},
-        div({},
-          div({display:"flex",alignItems:"center",gap:8,marginBottom:2},
-            div({width:32,height:32,borderRadius:10,background:G,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16},"🤝"),
-            e("p",{style:{fontWeight:700,fontSize:16}},"合伙记账")),
-          e("p",{style:{fontSize:11,color:"#9CA3AF"}},setup.partners.map(function(p){return p.name+" "+p.ratio+"%";}).join("  ·  "))),
-        div({textAlign:"right"},
-          e("p",{style:{fontSize:11,color:live?"#7C3AED":"#9CA3AF",fontWeight:live?600:400}},live?"💱 "+live:"获取汇率中"),
-          e("p",{style:{fontSize:10,color:"#9CA3AF"}},"默认 "+setup.rate))),
-      div({display:"flex",alignItems:"center",gap:8,marginBottom:14},
-        e("select",{value:month,onChange:function(ev){dp({type:"SET_MONTH",v:ev.target.value});},style:{flex:1,padding:"10px 14px",borderRadius:14,background:"#F3F4F6",border:"none",fontSize:13,fontWeight:500}},
-          ALL_MONTHS.map(function(m){return e("option",{key:m,value:m},m+(m>thisMonth()?" 🔮":""));})),
-        isSettled&&e("span",{className:"tag",style:{background:"#D1FAE5",color:"#065F46"}},"✓ 已结算"),
-        isFuture&&e("span",{className:"tag",style:{background:"#EDE9FE",color:"#5B21B6"}},"未来")),
-      div({display:"flex"},
-        TABS.map(function(t){
-          return e("button",{key:t[0],onClick:function(){dp({type:"SET_TAB",v:t[0]});},style:{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2,background:"none",padding:"6px 0",borderBottom:tab===t[0]?"2px solid #A855F7":"2px solid transparent"}},
-            e("span",{style:{fontSize:16,opacity:tab===t[0]?1:0.35}},t[1]),
-            e("span",{style:{fontSize:10,fontWeight:tab===t[0]?700:400,color:tab===t[0]?"#A855F7":"#9CA3AF"}},t[2]));
-        }))
-    ),
-
-    div({padding:"16px 16px"},
-
-      // DASHBOARD
-      tab==="dashboard"&&div({},
-        div({background:G,borderRadius:24,padding:"20px",marginBottom:16,color:"#fff",boxShadow:"0 8px 24px rgba(192,132,252,0.3)"},
-          div({display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16},
-            div({},e("p",{style:{fontSize:11,opacity:.8,marginBottom:4,fontWeight:500}},"净利润 · "+month),e("p",{style:{fontSize:30,fontWeight:800,letterSpacing:"-0.5px"}},fmtC(net,base))),
-            e(RateToggle,{val:rateMode,set:function(v){dp({type:"SET_RATE_MODE",v:v});}})),
-          div({display:"flex"},
-            div({flex:1,borderRight:"1px solid rgba(255,255,255,0.25)",paddingRight:16},e("p",{style:{fontSize:11,opacity:.7,marginBottom:2}},"收入"),e("p",{style:{fontSize:16,fontWeight:700}},fmtC(tInc,base))),
-            div({flex:1,paddingLeft:16},e("p",{style:{fontSize:11,opacity:.7,marginBottom:2}},"支出"),e("p",{style:{fontSize:16,fontWeight:700}},fmtC(tExp,base))))),
-        div({className:"card",marginBottom:14},
-          e("p",{className:"sec"},"各人结算差额"),
-          setup.partners.map(function(p,i){
-            var b=bal[p.id]||0,entitled=net*(p.ratio/100);
-            return div({key:p.id,display:"flex",alignItems:"center",gap:12,padding:"10px 0",borderBottom:i<setup.partners.length-1?"0.5px solid #F3F4F6":"none"},
-              e(Avatar,{name:p.name,idx:i,size:38}),
-              div({flex:1},e("p",{style:{fontSize:13,fontWeight:600}},p.name+" ("+p.ratio+"%)"),e("p",{style:{fontSize:11,color:"#9CA3AF"}},"应得 "+fmtC(entitled,base))),
-              div({textAlign:"right"},
-                e("p",{style:{fontSize:13,fontWeight:700,color:b>0.01?"#10B981":b<-0.01?"#F43F5E":"#9CA3AF"}},b>0.01?"↑ 应收":b<-0.01?"↓ 应付":"持平"),
-                Math.abs(b)>0.01&&e("p",{style:{fontSize:12,color:"#6B7280"}},fmtC(Math.abs(b),base))));
-          })),
-        trs.length>0&&div({className:"card",marginBottom:14,background:"linear-gradient(135deg,#FFF7ED,#FEF3C7)"},
-          e("p",{className:"sec",style:{color:"#92400E"}},"💸 本月待结算"),
-          trs.map(function(t,i){
-            return div({key:i,display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:i<trs.length-1?"0.5px solid rgba(251,191,36,0.3)":"none"},
-              e("span",{style:{fontSize:13,fontWeight:500,color:"#78350F"}},t.fromName+" → "+t.toName),
-              e("span",{style:{fontWeight:700,fontSize:14,color:"#D97706"}},fmtC(t.amount,base)));
-          })),
-        hasCharts&&barData.length>0&&div({className:"card",marginBottom:14},
-          e("p",{className:"sec"},"收支趋势"),
-          e(RC.ResponsiveContainer,{width:"100%",height:140},
-            e(RC.BarChart,{data:barData,margin:{top:0,right:0,left:-20,bottom:0}},
-              e(RC.XAxis,{dataKey:"m",tick:{fontSize:10,fill:"#9CA3AF"},axisLine:false,tickLine:false}),
-              e(RC.YAxis,{tick:{fontSize:10,fill:"#9CA3AF"},axisLine:false,tickLine:false}),
-              e(RC.Tooltip,{contentStyle:{background:"#fff",border:"none",borderRadius:12,boxShadow:"0 4px 16px rgba(0,0,0,0.1)",fontSize:12}}),
-              e(RC.Bar,{dataKey:"收入",fill:"#C084FC",radius:[6,6,0,0]}),
-              e(RC.Bar,{dataKey:"支出",fill:"#F472B6",radius:[6,6,0,0]})))),
-        hasCharts&&catData.length>0&&div({className:"card"},
-          e("p",{className:"sec"},"支出构成"),
-          e(RC.ResponsiveContainer,{width:"100%",height:150},
-            e(RC.PieChart,null,
-              e(RC.Pie,{data:catData,dataKey:"value",nameKey:"name",cx:"50%",cy:"50%",outerRadius:58,innerRadius:28,label:function(x){return x.name+" "+(x.percent*100).toFixed(0)+"%";},labelLine:false,fontSize:10},
-                catData.map(function(_,i){return e(RC.Cell,{key:i,fill:PALETTE[i%PALETTE.length]}); })),
-              e(RC.Tooltip,{formatter:function(v){return fmtC(v,base);},contentStyle:{background:"#fff",border:"none",borderRadius:12,fontSize:12}}))))
-      ),
-
-      // RECORD
-      tab==="record"&&div({},
-        div({display:"flex",gap:8,marginBottom:14},
-          [["income","💰 收入","#10B981"],["expense","🛍️ 支出","#F472B6"],["capital","🏦 注资","#F59E0B"]].map(function(t){
-            var active=showForm===t[0]&&!editingEntry;
-            return e("button",{key:t[0],onClick:function(){dp({type:"SHOW_FORM",v:active?null:t[0]});},style:{flex:1,padding:"11px 6px",borderRadius:14,background:active?t[2]:"#F3F4F6",color:active?"#fff":t[2],fontSize:12,fontWeight:700,boxShadow:active?"0 4px 12px "+t[2]+"55":"none"}},t[1]);
-          })),
-        showForm&&["income","expense","capital"].indexOf(showForm)!==-1&&e(EntryForm,{type:showForm,month:month,setup:setup,editing:editingEntry,onAdd:function(x){dp({type:"ADD_ENTRY",entry:x});},onUpdate:function(x){dp({type:"UPDATE_ENTRY",entry:x});},onCancel:function(){dp({type:"SHOW_FORM",v:null});}}),
-        [["income","💰 收入",mInc,"#10B981"],["capital","🏦 注资",mCap,"#F59E0B"],["expense","🛍️ 支出",mExp,"#F472B6"]].map(function(row){
-          var rtype=row[0],label=row[1],list=row[2],c=row[3];
-          if(!list.length)return null;
-          return div({key:rtype,marginBottom:16},
-            e("p",{className:"sec"},label),
-            list.map(function(x){
-              var rb=resBase(x,cur,rateMode,base);
-              var capToName="";
-              if(rtype==="capital"&&x.capitalFlow==="partner"&&x.capitalTo&&x.capitalTo!==x.paidBy){
-                var tp=setup.partners.find(function(p){return p.id===x.capitalTo;});
-                capToName=tp?tp.name:"?";
-              }
-              return div({key:x.id,background:"#fff",borderRadius:16,padding:"12px 14px",marginBottom:8,boxShadow:"0 1px 8px rgba(0,0,0,0.05)"},
-                div({display:"flex",justifyContent:"space-between",alignItems:"flex-start"},
-                  div({flex:1},
-                    div({display:"flex",alignItems:"baseline",gap:6,flexWrap:"wrap",marginBottom:3},
-                      e("span",{style:{fontWeight:700,fontSize:16,color:c}},fmtC(x.amount,x.currency)),
-                      x.currency!==base&&e("span",{style:{fontSize:11,color:"#9CA3AF"}},"≈"+fmtC(rb,base)),
-                      e("span",{style:{fontSize:10,background:"#F3E8FF",color:"#7C3AED",borderRadius:6,padding:"1px 5px",fontWeight:600}},"@"+x.rateAtEntry)),
-                    e("p",{style:{fontSize:11,color:"#9CA3AF"}},
-                      x.date+" · "+x.category+" · "+(setup.partners.find(function(p){return p.id===x.paidBy;})||{name:"—"}).name+
-                      (capToName?" → "+capToName:"")),
-                    x.note&&e("p",{style:{fontSize:11,color:"#9CA3AF",marginTop:2,fontStyle:"italic"}},'"'+x.note+'"')),
-                  div({display:"flex",gap:2,marginLeft:8},
-                    e("button",{className:"ibtn",onClick:function(){dp({type:"EDIT_ENTRY",entry:x});}},"✎"),
-                    e("button",{className:"ibtn",style:{color:"#F87171"},onClick:function(){dp({type:"CONFIRM_DEL",payload:{kind:"entry",id:x.id,label:"删除此记录？"}});}},"×"))));
-            }));
-        }),
-        mE.filter(function(x){return x.type!=="settlement";}).length===0&&!showForm&&div({textAlign:"center",padding:"40px 0"},e("p",{style:{fontSize:32,marginBottom:10}},"✨"),e("p",{style:{fontSize:14,color:"#9CA3AF"}},"本月暂无记录"))
-      ),
-
-      // SETTLE
-      tab==="settle"&&div({},
-        div({display:"flex",gap:10,marginBottom:14},
-          [["SHOW_SETTLE","✅ 月度结算",showSettle],["SHOW_MERGE","🔗 合并结算",showMerge]].map(function(t){
-            return e("button",{key:t[0],onClick:function(){dp({type:t[0],v:!t[2]});},style:{flex:1,padding:"12px",borderRadius:16,background:t[2]?G2:"#F3F4F6",color:t[2]?"#fff":"#6B7280",fontSize:13,fontWeight:600,boxShadow:t[2]?"0 4px 14px rgba(129,140,248,0.3)":"none"}},t[1]);
-          })),
-        showSettle&&e(SettleForm,{allEntries:entries,setup:setup,isMulti:false,defaultMonths:[month],rate:cur,rateMode:rateMode,onAdd:function(s,se){dp({type:"ADD_SETTLEMENT",settlement:s,se:se});},onCancel:function(){dp({type:"SHOW_SETTLE",v:false});}}),
-        showMerge&&e(SettleForm,{allEntries:entries,setup:setup,isMulti:true,defaultMonths:null,rate:cur,rateMode:rateMode,onAdd:function(s,se){dp({type:"ADD_SETTLEMENT",settlement:s,se:se});},onCancel:function(){dp({type:"SHOW_MERGE",v:false});}}),
-        div({className:"card"},
-          div({display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14},
-            e("p",{style:{fontWeight:700,fontSize:15}},month+" 结算单"),
-            e(RateToggle,{val:rateMode,set:function(v){dp({type:"SET_RATE_MODE",v:v});}})),
-          div({display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14},
-            [["收入",fmtC(tInc,base),"#10B981","#D1FAE5"],["支出",fmtC(tExp,base),"#F43F5E","#FFE4E6"],["净利润",fmtC(net,base),net>=0?"#7C3AED":"#F43F5E",net>=0?"#EDE9FE":"#FFE4E6"]].map(function(row){
-              return div({key:row[0],background:row[3],borderRadius:14,padding:"10px 12px"},e("p",{style:{fontSize:11,color:row[2],fontWeight:600,marginBottom:3}},row[0]),e("p",{style:{fontSize:13,fontWeight:800,color:row[2],wordBreak:"break-all"}},row[1]));
+      function setPbSafe(v){
+        setPb(v);
+        if(ct===v){var o=p.setup.partners.filter(function(x){return x.id!==v;});if(o.length)setCt(o[0].id);}
+      }
+      function submit(){
+        if(!amt||!pb)return;
+        var sd=date.startsWith(p.month)?date:p.month+"-01";
+        var ab=tb(amt,cur,p.setup.baseCurrency,rn);
+        var finalCt=safeCt;
+        var base={date:sd,month:p.month,amount:+amt,currency:cur,amountBase:ab,rateAtEntry:rn,baseCurrencyAtEntry:p.setup.baseCurrency,category:cat||"其他",paidBy:pb,note:note};
+        var entry=isC?Object.assign({},base,{type:"capital",capitalFlow:flow,capitalTo:flow==="partner"?finalCt:null}):Object.assign({},base,{type:p.type});
+        if(ed)p.onUpdate(Object.assign({},ed,entry));
+        else{p.onAdd(entry);setAmt("");setNote("");setCat("");}
+      }
+      var ac=isI?"#10B981":isC?"#F59E0B":"#F472B6";
+      var al=isI?"#D1FAE5":isC?"#FEF3C7":"#FCE7F3";
+      var ti=(ed?(isI?"编辑收入":isC?"编辑注资":"编辑支出"):(isI?"录入收入":isC?"录入注资":"录入支出"));
+      return dv({background:"#fff",borderRadius:20,padding:18,marginBottom:14,boxShadow:"0 2px 16px rgba(0,0,0,0.07)"},
+        dv({display:"flex",alignItems:"center",gap:10,marginBottom:16},
+          dv({width:36,height:36,borderRadius:10,background:al,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18},isI?"💰":isC?"🏦":"🛍️"),
+          h("p",{style:{fontWeight:700,fontSize:15,color:ac}},ti)),
+        dv({display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12},
+          dv({},h(Lbl,{t:"日期"}),h(Inp,{val:date,set:setDate,type:"date"})),
+          dv({},h(Lbl,{t:"货币"}),h(Ct,{val:cur,set:setCur}))),
+        dv({marginBottom:12},h(Lbl,{t:"金额 ("+(cur==="CNY"?"¥":"A$")+")"}),h(Inp,{val:amt,set:setAmt,type:"number",ph:"0.00"})),
+        dv({background:"#F3E8FF",borderRadius:14,padding:12,marginBottom:12},
+          h(Lbl,{t:"本笔汇率（1 AUD = ? CNY）"}),
+          dv({display:"flex",gap:8,alignItems:"center"},
+            h("input",{type:"number",value:er,placeholder:String(p.setup.rate),onChange:function(ev){setEr(ev.target.value);},style:{flex:1,padding:"9px 12px",borderRadius:10,border:"none",background:"#fff",fontSize:14}}),
+            h("button",{onClick:function(){setEr(String(p.setup.rate));},style:{background:"#C084FC",color:"#fff",borderRadius:10,padding:"9px 12px",fontSize:12,fontWeight:600,whiteSpace:"nowrap"}},"默认")),
+          prev&&h("p",{style:{fontSize:11,color:"#7C3AED",marginTop:6}},"≈ "+fc(prev,p.setup.baseCurrency))),
+        !isC&&dv({marginBottom:12},
+          h(Lbl,{t:"分类"}),
+          dv({display:"flex",flexWrap:"wrap",gap:6,marginBottom:8},(isI?iC:eC).map(function(x){return h("span",{key:x,className:"chip"+(cat===x?" on":""),onClick:function(){setCat(cat===x?"":x);}},x);})),
+          h(Inp,{val:cat,set:setCat,ph:"自定义分类..."})),
+        isC&&dv({marginBottom:12},
+          h(Lbl,{t:"资金流向"}),
+          dv({display:"flex",flexDirection:"column",gap:6,marginBottom:10},
+            [["partner","👤 转给另一合伙人"],["pool","🏦 进入公账"],["self","💼 自持备用金"]].map(function(x){
+              return h("button",{key:x[0],onClick:function(){setFlow(x[0]);},style:{padding:"10px 14px",textAlign:"left",borderRadius:12,background:flow===x[0]?"#FEF3C7":"#F3F4F6",color:flow===x[0]?"#92400E":"#6B7280",fontSize:13,fontWeight:flow===x[0]?600:400,border:flow===x[0]?"2px solid #F59E0B":"2px solid transparent"}},x[1]);
             })),
-          // per-partner breakdown
-          setup.partners.map(function(p,i){
-            var b=bal[p.id]||0,entitled=net*(p.ratio/100);
-            var myLoansOut=loanTrs.filter(function(t){return t.to===p.id;});
-            var myLoansIn=loanTrs.filter(function(t){return t.from===p.id;});
-            var totalLoanIn=myLoansOut.reduce(function(s,t){return s+t.amount;},0);
-            var totalLoanOut=myLoansIn.reduce(function(s,t){return s+t.amount;},0);
-            return div({key:p.id,background:"#F9FAFB",borderRadius:14,padding:"12px 14px",marginBottom:10},
-              div({display:"flex",alignItems:"center",gap:8,marginBottom:10},
-                e(Avatar,{name:p.name,idx:i,size:26}),
-                e("span",{style:{fontWeight:700,fontSize:14}}),
-                e("span",{style:{fontSize:11,color:"#9CA3AF"}},p.name+" ("+p.ratio+"%)"),
-                e("span",{style:{fontSize:11,color:"#9CA3AF"}})),
-              div({display:"flex",justifyContent:"space-between",marginBottom:5},
-                e("span",{style:{fontSize:12,color:"#6B7280"}},"利润应得"),
-                e("span",{style:{fontSize:12,fontWeight:600,color:"#7C3AED"}},fmtC(entitled,base))),
-              Math.abs(b)>0.01&&div({display:"flex",justifyContent:"space-between",marginBottom:5},
-                e("span",{style:{fontSize:12,color:"#6B7280"}},"收付垫付调整"),
-                e("span",{style:{fontSize:12,fontWeight:600,color:b>0?"#10B981":"#F43F5E"}},(b>0?"+":"")+fmtC(b,base))),
-              totalLoanIn>0&&div({display:"flex",justifyContent:"space-between",marginBottom:5},
-                e("span",{style:{fontSize:12,color:"#6B7280"}},"注资待收回"),
-                e("span",{style:{fontSize:12,fontWeight:600,color:"#10B981"}},"+"+fmtC(totalLoanIn,base))),
-              totalLoanOut>0&&div({display:"flex",justifyContent:"space-between",marginBottom:5},
-                e("span",{style:{fontSize:12,color:"#6B7280"}},"注资待还款"),
-                e("span",{style:{fontSize:12,fontWeight:600,color:"#F43F5E"}},"-"+fmtC(totalLoanOut,base))),
-              div({borderTop:"0.5px solid #E5E7EB",margin:"8px 0"}),
+          flow==="partner"&&dv({},h(Lbl,{t:"转给谁"}),h(Sel,{val:safeCt,set:setCt,opts:oth2.map(function(x){return[x.id,x.name];})}))
+        ),
+        dv({marginBottom:12},h(Lbl,{t:isC?"注资人":isI?"收款人":"付款人"}),h(Sel,{val:pb,set:setPbSafe,opts:p.setup.partners.map(function(x){return[x.id,x.name];})})),
+        dv({marginBottom:16},h(Lbl,{t:"备注"}),h(Inp,{val:note,set:setNote,ph:"可选"})),
+        dv({display:"flex",gap:10},
+          h(GB,{sx:{flex:2,padding:11},onClick:submit},ed?"保存修改":"确认添加"),
+          h("button",{className:"ghost",style:{flex:1},onClick:p.onCancel},"取消")));
+    }
+
+    // ── SettleForm ─────────────────────────────────────────────────────────────
+    function SF(p) {
+      var cands=MONTHS.filter(function(m){return m<=tmn()&&p.entries.some(function(x){return x.month===m&&x.type!=="settlement";});});
+      var a=useState(p.multi?cands.slice():(p.defM||[])),selM=a[0],setSelM=a[1];
+      var b=useState(tod()),date=b[0],setDate=b[1];
+      var c=useState(""),note=c[0],setNote=c[1];
+      var d=useState({}),cust=d[0],setCust=d[1];
+
+      var rel=p.entries.filter(function(x){return selM.indexOf(x.month)!==-1;});
+      var bal=calcBal(rel,p.setup.partners,p.rate,p.rm,p.setup.baseCurrency);
+      var pt=minTr(bal,p.setup.partners);
+      var lt=getLoans(rel,p.setup.partners,p.rate,p.rm,p.setup.baseCurrency);
+      var trs=mergeTr(pt,lt,p.setup.partners);
+
+      function tog(m){setSelM(function(s){return s.indexOf(m)!==-1?s.filter(function(x){return x!==m;}):s.concat([m]);});}
+      function fa(k,sg){var r=cust[k];if(r===undefined||r==="")return sg;var n=+r;return(isNaN(n)||n<0)?sg:n;}
+      function submit(){
+        if(!selM.length)return;
+        var lids=[];
+        var se=trs.map(function(t){
+          var k=t.from+t.to,a2=fa(k,t.amount),eid=uid();
+          lids.push(eid);
+          return{id:eid,date:date,month:selM[selM.length-1],type:"settlement",amount:a2,currency:p.setup.baseCurrency,amountBase:a2,rateAtEntry:p.rate,baseCurrencyAtEntry:p.setup.baseCurrency,fromId:t.from,fromName:t.fromName,toId:t.to,toName:t.toName,category:"结算",note:note,suggestedAmount:t.amount};
+        });
+        p.onAdd({months:selM.slice().sort(),date:date,transfers:se.slice(),note:note,rate:p.rate,linkedEntryIds:lids},se);
+      }
+      return dv({background:"#fff",borderRadius:20,padding:18,marginBottom:14,boxShadow:"0 2px 16px rgba(0,0,0,0.07)"},
+        h("p",{style:{fontWeight:700,fontSize:15,color:"#7C3AED",marginBottom:14}},p.multi?"🔗 合并结算":"✅ 月度结算"),
+        dv({marginBottom:12},
+          h(Lbl,{t:p.multi?"选择月份":"结算月份"}),
+          dv({display:"flex",flexWrap:"wrap",gap:6},
+            cands.map(function(m){return h("span",{key:m,className:"chip"+(selM.indexOf(m)!==-1?" on":""),onClick:function(){tog(m);}},m);}),
+            !cands.length&&h("p",{style:{fontSize:12,color:"#9CA3AF"}},"暂无可结算月份"))),
+        selM.length>0&&trs.length>0&&dv({background:"#EDE9FE",borderRadius:14,padding:14,marginBottom:12},
+          h("p",{style:{fontSize:12,color:"#7C3AED",fontWeight:700,marginBottom:10}},"💸 最终转账方案（"+selM.length+"个月）"),
+          trs.map(function(t){
+            var k=t.from+t.to;
+            return dv({key:k,marginBottom:10},
+              dv({display:"flex",justifyContent:"space-between",marginBottom:5},
+                h("span",{style:{fontSize:13,fontWeight:600}},t.fromName+" → "+t.toName),
+                h("span",{style:{fontSize:12,color:"#7C3AED"}},"建议 "+fc(t.amount,p.setup.baseCurrency))),
+              dv({display:"flex",gap:8,alignItems:"center"},
+                h("input",{type:"number",placeholder:fn(t.amount),value:cust[k]!==undefined?cust[k]:"",onChange:function(ev){var v=ev.target.value;setCust(function(prev){var n=Object.assign({},prev);n[k]=v;return n;});},style:{flex:1,padding:"8px 12px",borderRadius:10,border:"none",background:"#fff",fontSize:13}}),
+                h("span",{style:{fontSize:12,color:"#7C3AED",whiteSpace:"nowrap"}},p.setup.baseCurrency)),
+              h("p",{style:{fontSize:11,color:"#A78BFA",marginTop:4}},"实际："+fc(fa(k,t.amount),p.setup.baseCurrency)));
+          })),
+        selM.length>0&&trs.length===0&&dv({textAlign:"center",padding:14,background:"#F3F4F6",borderRadius:14,marginBottom:12},h("p",{style:{fontSize:13,color:"#6B7280"}},"所选月份无未清余额 🎉")),
+        dv({display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14},
+          dv({},h(Lbl,{t:"结算日期"}),h(Inp,{val:date,set:setDate,type:"date"})),
+          dv({},h(Lbl,{t:"备注"}),h(Inp,{val:note,set:setNote,ph:"可选"}))),
+        dv({display:"flex",gap:10},
+          h(GB,{sx:{flex:2,padding:11},onClick:submit},"确认结算"),
+          h("button",{className:"ghost",style:{flex:1},onClick:p.onCancel},"取消")));
+    }
+
+    // ── App ────────────────────────────────────────────────────────────────────
+    function App() {
+      var saved=useMemo(function(){return lsLoad();},[]);
+      var r=useReducer(red,saved,initSt),st=r[0],dp=r[1];
+      var lv=useState(null),live=lv[0],setLive=lv[1];
+      useEffect(function(){
+        fetch("https://api.frankfurter.app/latest?from=AUD&to=CNY")
+          .then(function(x){return x.json();})
+          .then(function(d){if(d&&d.rates&&d.rates.CNY)setLive((+d.rates.CNY).toFixed(4));})
+          .catch(function(){});
+      },[]);
+
+      var setup=st.setup,month=st.month,tab=st.tab,rm=st.rateMode,entries=st.entries,settlements=st.settlements,cd=st.cd,sf=st.sf,ee=st.ee,ss=st.ss,sm=st.sm;
+      var cur=setup?setup.rate:4.7, bc=setup?setup.baseCurrency:"CNY";
+
+      // All hooks before any conditional return
+      var mE=useMemo(function(){return setup?entries.filter(function(x){return x.month===month;}):[]; },[entries,month,setup]);
+      var mInc=useMemo(function(){return mE.filter(function(x){return x.type==="income";});},[mE]);
+      var mExp=useMemo(function(){return mE.filter(function(x){return x.type==="expense";});},[mE]);
+      var mCap=useMemo(function(){return mE.filter(function(x){return x.type==="capital";});},[mE]);
+      var tInc=useMemo(function(){return mInc.reduce(function(s,x){return s+rb(x,cur,rm,bc);},0);},[mInc,cur,rm,bc]);
+      var tExp=useMemo(function(){return mExp.reduce(function(s,x){return s+rb(x,cur,rm,bc);},0);},[mExp,cur,rm,bc]);
+      var net=tInc-tExp;
+      var bal=useMemo(function(){return setup?calcBal(mE,setup.partners,cur,rm,bc):{};},[mE,setup,cur,rm,bc]);
+      var ptrs=useMemo(function(){return setup?minTr(bal,setup.partners):[];},[bal,setup]);
+      var ltrs=useMemo(function(){return setup?getLoans(mE,setup.partners,cur,rm,bc):[];},[mE,setup,cur,rm,bc]);
+      var trs=useMemo(function(){return setup?mergeTr(ptrs,ltrs,setup.partners):[];},[ptrs,ltrs,setup]);
+      var sMs=useMemo(function(){var s={};settlements.forEach(function(x){(x.months||[]).forEach(function(m){s[m]=true;});});return s;},[settlements]);
+      var catD=useMemo(function(){var c={};mExp.forEach(function(x){c[x.category]=(c[x.category]||0)+rb(x,cur,rm,bc);});return Object.keys(c).map(function(k){return{name:k,value:c[k]};});},[mExp,cur,rm,bc]);
+      var barD=useMemo(function(){return MONTHS.map(function(m){return{m:m.slice(5),收入:entries.filter(function(x){return x.month===m&&x.type==="income";}).reduce(function(s,x){return s+rb(x,cur,rm,bc);},0),支出:entries.filter(function(x){return x.month===m&&x.type==="expense";}).reduce(function(s,x){return s+rb(x,cur,rm,bc);},0)};}).filter(function(x){return x.收入>0||x.支出>0;});},[entries,cur,rm,bc]);
+
+      if(!setup){return h(Setup,{onDone:function(v){dp({t:"DONE",v:v});}});}
+
+      var isS=!!sMs[month],isF=month>tmn();
+      var TABS=[["dash","⬡","主页"],["rec","✦","记录"],["set","◎","结算"],["his","≡","历史"],["cfg","⊙","设置"]];
+
+      function addSettle(s,se){dp({t:"AS",v:s,se:se});}
+
+      return dv({maxWidth:480,margin:"0 auto",paddingBottom:80,background:"#F9FAFB",minHeight:"100vh"},
+        cd&&h(CDlg,{msg:cd.msg||"确认删除？",onCancel:function(){dp({t:"CC"});},onOk:function(){
+          if(cd.k==="ei")dp({t:"DI",v:cd.id});
+          else if(cd.k==="es")dp({t:"DS",v:cd.id});
+          else if(cd.k==="reset")dp({t:"RESET"});
+        }}),
+
+        // Header
+        dv({background:"#fff",padding:"20px 18px 0",boxShadow:"0 1px 0 #F3F4F6"},
+          dv({display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14},
+            dv({},
+              dv({display:"flex",alignItems:"center",gap:8,marginBottom:2},
+                dv({width:32,height:32,borderRadius:10,background:G,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16},"🤝"),
+                h("p",{style:{fontWeight:700,fontSize:16}},"合伙记账")),
+              h("p",{style:{fontSize:11,color:"#9CA3AF"}},setup.partners.map(function(p){return p.name+" "+p.ratio+"%";}).join("  ·  "))),
+            dv({textAlign:"right"},
+              h("p",{style:{fontSize:11,color:live?"#7C3AED":"#9CA3AF",fontWeight:live?600:400}},live?"💱 "+live:"获取汇率中"),
+              h("p",{style:{fontSize:10,color:"#9CA3AF"}},"默认 "+setup.rate))),
+          dv({display:"flex",alignItems:"center",gap:8,marginBottom:14},
+            h("select",{value:month,onChange:function(ev){dp({t:"MON",v:ev.target.value});},style:{flex:1,padding:"10px 14px",borderRadius:14,background:"#F3F4F6",border:"none",fontSize:13,fontWeight:500}},
+              MONTHS.map(function(m){return h("option",{key:m,value:m},m+(m>tmn()?" 🔮":""));})),
+            isS&&h("span",{className:"tag",style:{background:"#D1FAE5",color:"#065F46"}},"✓ 已结算"),
+            isF&&h("span",{className:"tag",style:{background:"#EDE9FE",color:"#5B21B6"}},"未来")),
+          dv({display:"flex"},TABS.map(function(t){
+            return h("button",{key:t[0],onClick:function(){dp({t:"TAB",v:t[0]});},style:{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2,background:"none",padding:"6px 0",borderBottom:tab===t[0]?"2px solid #A855F7":"2px solid transparent"}},
+              h("span",{style:{fontSize:16,opacity:tab===t[0]?1:0.35}},t[1]),
+              h("span",{style:{fontSize:10,fontWeight:tab===t[0]?700:400,color:tab===t[0]?"#A855F7":"#9CA3AF"}},t[2]));
+          }))),
+
+        dv({padding:"16px 16px"},
+
+          // DASH
+          tab==="dash"&&dv({},
+            dv({background:G,borderRadius:24,padding:"20px",marginBottom:16,color:"#fff",boxShadow:"0 8px 24px rgba(192,132,252,0.3)"},
+              dv({display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16},
+                dv({},h("p",{style:{fontSize:11,opacity:.8,marginBottom:4,fontWeight:500}},"净利润 · "+month),h("p",{style:{fontSize:30,fontWeight:800}},fc(net,bc))),
+                h(Rt,{val:rm,set:function(v){dp({t:"RM",v:v});}})),
+              dv({display:"flex"},
+                dv({flex:1,borderRight:"1px solid rgba(255,255,255,0.25)",paddingRight:16},h("p",{style:{fontSize:11,opacity:.7,marginBottom:2}},"收入"),h("p",{style:{fontSize:16,fontWeight:700}},fc(tInc,bc))),
+                dv({flex:1,paddingLeft:16},h("p",{style:{fontSize:11,opacity:.7,marginBottom:2}},"支出"),h("p",{style:{fontSize:16,fontWeight:700}},fc(tExp,bc))))),
+            dv({className:"card",marginBottom:14},
+              h("p",{className:"sec"},"各人结算差额"),
+              setup.partners.map(function(p,i){
+                var bv=bal[p.id]||0,ent=net*(p.ratio/100);
+                return dv({key:p.id,display:"flex",alignItems:"center",gap:12,padding:"10px 0",borderBottom:i<setup.partners.length-1?"0.5px solid #F3F4F6":"none"},
+                  h(Av,{n:p.name,i:i,sz:38}),
+                  dv({flex:1},h("p",{style:{fontSize:13,fontWeight:600}},p.name+" ("+p.ratio+"%)"),h("p",{style:{fontSize:11,color:"#9CA3AF"}},"应得 "+fc(ent,bc))),
+                  dv({textAlign:"right"},
+                    h("p",{style:{fontSize:13,fontWeight:700,color:bv>0.01?"#10B981":bv<-0.01?"#F43F5E":"#9CA3AF"}},bv>0.01?"↑ 应收":bv<-0.01?"↓ 应付":"持平"),
+                    Math.abs(bv)>0.01&&h("p",{style:{fontSize:12,color:"#6B7280"}},fc(Math.abs(bv),bc))));
+              })),
+            trs.length>0&&dv({className:"card",marginBottom:14,background:"linear-gradient(135deg,#FFF7ED,#FEF3C7)"},
+              h("p",{className:"sec",style:{color:"#92400E"}},"💸 本月待结算"),
+              trs.map(function(t,i){
+                return dv({key:i,display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:i<trs.length-1?"0.5px solid rgba(251,191,36,0.3)":"none"},
+                  h("span",{style:{fontSize:13,fontWeight:500,color:"#78350F"}},t.fromName+" → "+t.toName),
+                  h("span",{style:{fontWeight:700,fontSize:14,color:"#D97706"}},fc(t.amount,bc)));
+              })),
+            hasCharts&&barD.length>0&&dv({className:"card",marginBottom:14},
+              h("p",{className:"sec"},"收支趋势"),
+              h(RC.ResponsiveContainer,{width:"100%",height:140},
+                h(RC.BarChart,{data:barD,margin:{top:0,right:0,left:-20,bottom:0}},
+                  h(RC.XAxis,{dataKey:"m",tick:{fontSize:10,fill:"#9CA3AF"},axisLine:false,tickLine:false}),
+                  h(RC.YAxis,{tick:{fontSize:10,fill:"#9CA3AF"},axisLine:false,tickLine:false}),
+                  h(RC.Tooltip,{contentStyle:{background:"#fff",border:"none",borderRadius:12,fontSize:12}}),
+                  h(RC.Bar,{dataKey:"收入",fill:"#C084FC",radius:[6,6,0,0]}),
+                  h(RC.Bar,{dataKey:"支出",fill:"#F472B6",radius:[6,6,0,0]})))),
+            hasCharts&&catD.length>0&&dv({className:"card"},
+              h("p",{className:"sec"},"支出构成"),
+              h(RC.ResponsiveContainer,{width:"100%",height:150},
+                h(RC.PieChart,null,
+                  h(RC.Pie,{data:catD,dataKey:"value",nameKey:"name",cx:"50%",cy:"50%",outerRadius:58,innerRadius:28,label:function(x){return x.name+" "+(x.percent*100).toFixed(0)+"%";},labelLine:false,fontSize:10},
+                    catD.map(function(_,i){return h(RC.Cell,{key:i,fill:PAL[i%PAL.length]});})),
+                  h(RC.Tooltip,{formatter:function(v){return fc(v,bc);},contentStyle:{background:"#fff",border:"none",borderRadius:12,fontSize:12}}))))
+          ),
+
+          // REC
+          tab==="rec"&&dv({},
+            dv({display:"flex",gap:8,marginBottom:14},
+              [["income","💰 收入","#10B981"],["expense","🛍️ 支出","#F472B6"],["capital","🏦 注资","#F59E0B"]].map(function(t){
+                var act=sf===t[0]&&!ee;
+                return h("button",{key:t[0],onClick:function(){dp({t:"SF",v:act?null:t[0]});},style:{flex:1,padding:"11px 6px",borderRadius:14,background:act?t[2]:"#F3F4F6",color:act?"#fff":t[2],fontSize:12,fontWeight:700,boxShadow:act?"0 4px 12px "+t[2]+"55":"none"}},t[1]);
+              })),
+            sf&&["income","expense","capital"].indexOf(sf)!==-1&&h(EF,{type:sf,month:month,setup:setup,editing:ee,onAdd:function(x){dp({t:"AI",v:x});},onUpdate:function(x){dp({t:"UI",v:x});},onCancel:function(){dp({t:"SF",v:null});}}),
+            [["income","💰 收入",mInc,"#10B981"],["capital","🏦 注资",mCap,"#F59E0B"],["expense","🛍️ 支出",mExp,"#F472B6"]].map(function(row){
+              if(!row[2].length)return null;
+              return dv({key:row[0],marginBottom:16},
+                h("p",{className:"sec"},row[1]),
+                row[2].map(function(x){
+                  var xb=rb(x,cur,rm,bc);
+                  var ctn="";
+                  if(row[0]==="capital"&&x.capitalFlow==="partner"&&x.capitalTo&&x.capitalTo!==x.paidBy){
+                    var tp=setup.partners.find(function(p){return p.id===x.capitalTo;});
+                    ctn=tp?tp.name:"?";
+                  }
+                  return dv({key:x.id,background:"#fff",borderRadius:16,padding:"12px 14px",marginBottom:8,boxShadow:"0 1px 8px rgba(0,0,0,0.05)"},
+                    dv({display:"flex",justifyContent:"space-between",alignItems:"flex-start"},
+                      dv({flex:1},
+                        dv({display:"flex",alignItems:"baseline",gap:6,flexWrap:"wrap",marginBottom:3},
+                          h("span",{style:{fontWeight:700,fontSize:16,color:row[3]}},fc(x.amount,x.currency)),
+                          x.currency!==bc&&h("span",{style:{fontSize:11,color:"#9CA3AF"}},"≈"+fc(xb,bc)),
+                          h("span",{style:{fontSize:10,background:"#F3E8FF",color:"#7C3AED",borderRadius:6,padding:"1px 5px",fontWeight:600}},"@"+x.rateAtEntry)),
+                        h("p",{style:{fontSize:11,color:"#9CA3AF"}},x.date+" · "+x.category+" · "+(setup.partners.find(function(p){return p.id===x.paidBy;})||{name:"—"}).name+(ctn?" → "+ctn:"")),
+                        x.note&&h("p",{style:{fontSize:11,color:"#9CA3AF",marginTop:2,fontStyle:"italic"}},'"'+x.note+'"')),
+                      dv({display:"flex",gap:2,marginLeft:8},
+                        h("button",{className:"ibtn",onClick:function(){dp({t:"EE",v:x});}},"✎"),
+                        h("button",{className:"ibtn",style:{color:"#F87171"},onClick:function(){dp({t:"CD",v:{k:"ei",id:x.id,msg:"删除此记录？"}});}},"×"))));
+                }));
+            }),
+            mE.filter(function(x){return x.type!=="settlement";}).length===0&&!sf&&dv({textAlign:"center",padding:"40px 0"},h("p",{style:{fontSize:32,marginBottom:10}},"✨"),h("p",{style:{fontSize:14,color:"#9CA3AF"}},"本月暂无记录"))
+          ),
+
+          // SETTLE
+          tab==="set"&&dv({},
+            dv({display:"flex",gap:10,marginBottom:14},
+              [["SS","✅ 月度结算",ss],["SM","🔗 合并结算",sm]].map(function(t){
+                return h("button",{key:t[0],onClick:function(){dp({t:t[0],v:!t[2]});},style:{flex:1,padding:"12px",borderRadius:16,background:t[2]?G2:"#F3F4F6",color:t[2]?"#fff":"#6B7280",fontSize:13,fontWeight:600,boxShadow:t[2]?"0 4px 14px rgba(129,140,248,0.3)":"none"}},t[1]);
+              })),
+            ss&&h(SF,{entries:entries,setup:setup,multi:false,defM:[month],rate:cur,rm:rm,onAdd:addSettle,onCancel:function(){dp({t:"SS",v:false});}}),
+            sm&&h(SF,{entries:entries,setup:setup,multi:true,defM:null,rate:cur,rm:rm,onAdd:addSettle,onCancel:function(){dp({t:"SM",v:false});}}),
+            dv({className:"card"},
+              dv({display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14},
+                h("p",{style:{fontWeight:700,fontSize:15}},month+" 结算单"),
+                h(Rt,{val:rm,set:function(v){dp({t:"RM",v:v});}})),
+              dv({display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14},
+                [["收入",fc(tInc,bc),"#10B981","#D1FAE5"],["支出",fc(tExp,bc),"#F43F5E","#FFE4E6"],["净利润",fc(net,bc),net>=0?"#7C3AED":"#F43F5E",net>=0?"#EDE9FE":"#FFE4E6"]].map(function(row){
+                  return dv({key:row[0],background:row[3],borderRadius:14,padding:"10px 12px"},h("p",{style:{fontSize:11,color:row[2],fontWeight:600,marginBottom:3}},row[0]),h("p",{style:{fontSize:13,fontWeight:800,color:row[2]}},row[1]));
+                })),
+              setup.partners.map(function(p,i){
+                var bv=bal[p.id]||0,ent=net*(p.ratio/100);
+                var loIn=ltrs.filter(function(t){return t.to===p.id;}).reduce(function(s,t){return s+t.amount;},0);
+                var loOut=ltrs.filter(function(t){return t.from===p.id;}).reduce(function(s,t){return s+t.amount;},0);
+                return dv({key:p.id,background:"#F9FAFB",borderRadius:14,padding:"12px 14px",marginBottom:10},
+                  dv({display:"flex",alignItems:"center",gap:8,marginBottom:8},h(Av,{n:p.name,i:i,sz:26}),h("span",{style:{fontWeight:700,fontSize:14}},p.name),h("span",{style:{fontSize:11,color:"#9CA3AF"}},p.ratio+"%")),
+                  dv({display:"flex",justifyContent:"space-between",marginBottom:4},h("span",{style:{fontSize:12,color:"#6B7280"}},"利润应得"),h("span",{style:{fontSize:12,fontWeight:600,color:"#7C3AED"}},fc(ent,bc))),
+                  Math.abs(bv)>0.01&&dv({display:"flex",justifyContent:"space-between",marginBottom:4},h("span",{style:{fontSize:12,color:"#6B7280"}},"收付垫付调整"),h("span",{style:{fontSize:12,fontWeight:600,color:bv>0?"#10B981":"#F43F5E"}},(bv>0?"+":"")+fc(bv,bc))),
+                  loIn>0&&dv({display:"flex",justifyContent:"space-between",marginBottom:4},h("span",{style:{fontSize:12,color:"#6B7280"}},"注资待收回"),h("span",{style:{fontSize:12,fontWeight:600,color:"#10B981"}},"+"+fc(loIn,bc))),
+                  loOut>0&&dv({display:"flex",justifyContent:"space-between",marginBottom:4},h("span",{style:{fontSize:12,color:"#6B7280"}},"注资待还款"),h("span",{style:{fontSize:12,fontWeight:600,color:"#F43F5E"}},"-"+fc(loOut,bc))),
+                  dv({borderTop:"0.5px solid #E5E7EB",margin:"8px 0"}),
+                  (function(){var na=ent+bv+loIn-loOut;return dv({display:"flex",justifyContent:"space-between"},h("span",{style:{fontSize:13,fontWeight:700}},"最终"),h("span",{style:{fontSize:13,fontWeight:700,color:na>0.01?"#10B981":na<-0.01?"#F43F5E":"#9CA3AF"}},na>0.01?"应收 "+fc(na,bc):na<-0.01?"应付 "+fc(Math.abs(na),bc):"持平"));})()); 
+              }),
+              trs.length>0&&dv({background:"#EDE9FE",borderRadius:14,padding:"12px 14px",marginTop:4},
+                h("p",{style:{fontSize:12,color:"#7C3AED",fontWeight:700,marginBottom:8}},"💸 最终转账方案"),
+                trs.map(function(t,i){
+                  return dv({key:i,display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:i<trs.length-1?"0.5px solid #DDD6FE":"none"},
+                    h("span",{style:{fontSize:13,fontWeight:600}},t.fromName+" → "+t.toName),
+                    h("span",{style:{fontSize:14,fontWeight:700,color:"#7C3AED"}},fc(t.amount,bc)));
+                })),
+              isS&&dv({marginTop:14,padding:"10px 14px",background:"#D1FAE5",borderRadius:12},
+                h("p",{style:{fontSize:13,color:"#065F46",fontWeight:700}},"✓ 本月已结算"),
+                settlements.filter(function(x){return(x.months||[]).indexOf(month)!==-1;}).map(function(x){
+                  return h("p",{key:x.id,style:{fontSize:11,color:"#047857",marginTop:2}},x.date+(x.months.length>1?" · 合并("+x.months.length+"月)":"")+(x.note?" · "+x.note:""));
+                })))
+          ),
+
+          // HISTORY
+          tab==="his"&&dv({},
+            dv({display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14},
+              h("p",{style:{fontWeight:700,fontSize:15}},"结算记录"),
+              h(Rt,{val:rm,set:function(v){dp({t:"RM",v:v});}})),
+            settlements.length===0
+              ?dv({textAlign:"center",padding:"40px 0"},h("p",{style:{fontSize:32,marginBottom:10}},"📋"),h("p",{style:{color:"#9CA3AF",fontSize:14}},"暂无结算记录"))
+              :settlements.slice().reverse().map(function(s){
+                return dv({key:s.id,className:"card",marginBottom:12},
+                  dv({display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10},
+                    dv({},
+                      dv({display:"flex",alignItems:"center",gap:6,marginBottom:4},
+                        h("span",{className:"tag",style:{background:"#D1FAE5",color:"#065F46"}},(s.months||[]).length>1?"合并 "+s.months.length+"月":"月结"),
+                        h("span",{style:{fontSize:12,color:"#9CA3AF"}},s.date),
+                        h("span",{style:{fontSize:10,background:"#F3E8FF",color:"#7C3AED",borderRadius:6,padding:"1px 5px",fontWeight:600}},"@"+s.rate)),
+                      h("p",{style:{fontSize:11,color:"#9CA3AF"}},(s.months||[]).join("  ·  "))),
+                    h("button",{className:"ibtn",style:{color:"#F87171"},onClick:function(){dp({t:"CD",v:{k:"es",id:s.id,msg:"撤销此结算？关联流水将一并删除"}});}},"×")),
+                  (s.transfers||[]).map(function(t,i){
+                    return dv({key:i,display:"flex",justifyContent:"space-between",padding:"8px 0",borderTop:"0.5px solid #F3F4F6"},
+                      h("span",{style:{fontSize:13}},t.fromName+" → "+t.toName),
+                      h("span",{style:{fontWeight:700,fontSize:13,color:"#7C3AED"}},fc(rb(t,cur,rm,bc),bc)));
+                  }));
+              }),
+            dv({marginTop:16},
+              h("p",{style:{fontWeight:700,fontSize:15,marginBottom:12}},"各月状态"),
+              MONTHS.filter(function(m){return entries.some(function(x){return x.month===m&&x.type!=="settlement";})||sMs[m];}).map(function(m){
+                var mi=entries.filter(function(x){return x.month===m&&x.type==="income";}).reduce(function(s,x){return s+rb(x,cur,rm,bc);},0);
+                var me2=entries.filter(function(x){return x.month===m&&x.type==="expense";}).reduce(function(s,x){return s+rb(x,cur,rm,bc);},0);
+                var settled=!!sMs[m],fut=m>tmn();
+                var mEntries=entries.filter(function(x){return x.month===m;});
+                var mb=calcBal(mEntries,setup.partners,cur,rm,bc);
+                var mp=minTr(mb,setup.partners);
+                var ml=getLoans(mEntries,setup.partners,cur,rm,bc);
+                var hasBal=!settled&&mEntries.some(function(x){return x.type!=="settlement";})?mergeTr(mp,ml,setup.partners).some(function(t){return t.amount>0.05;}):false;
+                return dv({key:m,display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0",borderBottom:"0.5px solid #F3F4F6"},
+                  dv({},h("span",{style:{fontSize:13,fontWeight:600}},m),h("span",{style:{fontSize:11,color:"#9CA3AF",marginLeft:8}},"收"+fc(mi,bc)+" 支"+fc(me2,bc))),
+                  h("span",{className:"tag",style:{background:settled?"#D1FAE5":fut?"#EDE9FE":hasBal?"#FEF3C7":"#F3F4F6",color:settled?"#065F46":fut?"#5B21B6":hasBal?"#92400E":"#9CA3AF"}},settled?"✓ 已结算":fut?"未来":hasBal?"待结算":"无余额"));
+              }))
+          ),
+
+          // SETTINGS
+          tab==="cfg"&&dv({},
+            dv({className:"card",marginBottom:16,border:"1.5px solid #FFE4E6"},
+              h("p",{style:{fontWeight:700,marginBottom:6,color:"#F43F5E"}},"⚠️ 危险操作"),
+              h("p",{style:{fontSize:12,color:"#9CA3AF",marginBottom:12}},"清空所有数据，不可撤销。"),
+              h("button",{onClick:function(){dp({t:"CD",v:{k:"reset",msg:"确定要清空所有数据吗？不可撤销！"}});},style:{width:"100%",padding:"11px",borderRadius:14,background:"#FFF1F2",color:"#F43F5E",fontWeight:700,fontSize:14,border:"1.5px solid #FECDD3"}},"🗑️ 清空所有数据，重新开始")),
+            dv({className:"card",marginBottom:16},
+              h("p",{style:{fontWeight:700,marginBottom:6}},"默认汇率"),
+              live&&dv({display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",background:"#F3E8FF",borderRadius:12,marginBottom:10},
+                h("span",{style:{fontSize:13,color:"#7C3AED",fontWeight:600}},"实时 1 AUD = "+live+" CNY"),
+                h("button",{style:{background:"#C084FC",color:"#fff",borderRadius:10,padding:"6px 12px",fontSize:12,fontWeight:600},onClick:function(){dp({t:"UPS",v:Object.assign({},setup,{rate:+live})});}},"使用")),
               (function(){
-                var netAmt=entitled+b+totalLoanIn-totalLoanOut;
-                return div({display:"flex",justifyContent:"space-between"},
-                  e("span",{style:{fontSize:13,fontWeight:700}},"最终"),
-                  e("span",{style:{fontSize:13,fontWeight:700,color:netAmt>0.01?"#10B981":netAmt<-0.01?"#F43F5E":"#9CA3AF"}},
-                    netAmt>0.01?"应收 "+fmtC(netAmt,base):netAmt<-0.01?"应付 "+fmtC(Math.abs(netAmt),base):"持平"));
-              })());
-          }),
-          trs.length>0&&div({background:"#EDE9FE",borderRadius:14,padding:"12px 14px",marginTop:4},
-            e("p",{style:{fontSize:12,color:"#7C3AED",fontWeight:700,marginBottom:8}},"💸 最终转账方案"),
-            trs.map(function(t,i){
-              return div({key:i,display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:i<trs.length-1?"0.5px solid #DDD6FE":"none"},
-                e("span",{style:{fontSize:13,fontWeight:600}},t.fromName+" → "+t.toName),
-                e("span",{style:{fontSize:14,fontWeight:700,color:"#7C3AED"}},fmtC(t.amount,base)));
-            })),
-          isSettled&&div({marginTop:14,padding:"10px 14px",background:"#D1FAE5",borderRadius:12},
-            e("p",{style:{fontSize:13,color:"#065F46",fontWeight:700}},"✓ 本月已结算"),
-            settlements.filter(function(x){return(x.months||[]).indexOf(month)!==-1;}).map(function(x){
-              return e("p",{key:x.id,style:{fontSize:11,color:"#047857",marginTop:2}},x.date+(x.months.length>1?" · 合并("+x.months.length+"月)":"")+(x.note?" · "+x.note:""));
-            }))
-        )
-      ),
+                var qr=useState(String(setup.rate)),qv=qr[0],setQv=qr[1];
+                return dv({display:"flex",gap:8},
+                  h("input",{type:"number",value:qv,placeholder:String(setup.rate),onChange:function(ev){setQv(ev.target.value);},style:{flex:1,padding:"10px 14px",borderRadius:12,border:"none",background:"#F3F4F6",fontSize:14}}),
+                  h(GB,{onClick:function(){var n=+qv;if(n>0)dp({t:"UPS",v:Object.assign({},setup,{rate:n});});}},h("span",null,"更新")));
+              })()),
+            h("p",{style:{fontWeight:700,fontSize:15,marginBottom:12}},"合伙人 & 货币"),
+            h(Setup,{ex:setup,onDone:function(v){dp({t:"UPS",v:v});}}))
+        ),
 
-      // HISTORY
-      tab==="history"&&div({},
-        div({display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14},
-          e("p",{style:{fontWeight:700,fontSize:15}},"结算记录"),
-          e(RateToggle,{val:rateMode,set:function(v){dp({type:"SET_RATE_MODE",v:v});}})),
-        settlements.length===0
-          ?div({textAlign:"center",padding:"40px 0"},e("p",{style:{fontSize:32,marginBottom:10}},"📋"),e("p",{style:{color:"#9CA3AF",fontSize:14}},"暂无结算记录"))
-          :settlements.slice().reverse().map(function(s){
-            return div({key:s.id,className:"card",marginBottom:12},
-              div({display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10},
-                div({},
-                  div({display:"flex",alignItems:"center",gap:6,marginBottom:4},
-                    e("span",{className:"tag",style:{background:"#D1FAE5",color:"#065F46"}},(s.months||[]).length>1?"合并 "+s.months.length+"月":"月结"),
-                    e("span",{style:{fontSize:12,color:"#9CA3AF"}},s.date),
-                    e("span",{style:{fontSize:10,background:"#F3E8FF",color:"#7C3AED",borderRadius:6,padding:"1px 5px",fontWeight:600}},"@"+s.rate)),
-                  e("p",{style:{fontSize:11,color:"#9CA3AF"}},(s.months||[]).join("  ·  "))),
-                e("button",{className:"ibtn",style:{color:"#F87171"},onClick:function(){dp({type:"CONFIRM_DEL",payload:{kind:"settlement",id:s.id,label:"撤销此结算？关联流水将一并删除"}});}},"×")),
-              (s.transfers||[]).map(function(t,i){
-                return div({key:i,display:"flex",justifyContent:"space-between",padding:"8px 0",borderTop:"0.5px solid #F3F4F6"},
-                  e("span",{style:{fontSize:13}},t.fromName+" → "+t.toName),
-                  e("span",{style:{fontWeight:700,fontSize:13,color:"#7C3AED"}},fmtC(resBase(t,cur,rateMode,base),base)));
-              }));
-          }),
-        div({marginTop:16},
-          e("p",{style:{fontWeight:700,fontSize:15,marginBottom:12}},"各月状态"),
-          ALL_MONTHS.filter(function(m){return entries.some(function(x){return x.month===m&&x.type!=="settlement";})||settledMs[m];}).map(function(m){
-            var inc=entries.filter(function(x){return x.month===m&&x.type==="income";}).reduce(function(s,x){return s+resBase(x,cur,rateMode,base);},0);
-            var exp=entries.filter(function(x){return x.month===m&&x.type==="expense";}).reduce(function(s,x){return s+resBase(x,cur,rateMode,base);},0);
-            var settled=!!settledMs[m],fut=m>thisMonth();
-            var me=entries.filter(function(x){return x.month===m;});
-            var mbal=calcBal(me,setup.partners,cur,rateMode,base);
-            var mptrs=minTr(mbal,setup.partners);
-            var mltrs=getCapitalLoans(me,setup.partners,cur,rateMode,base);
-            var hasBal=!settled&&me.some(function(x){return x.type!=="settlement";})?mergeTransfers(mptrs,mltrs,setup.partners).some(function(t){return t.amount>0.05;}):false;
-            return div({key:m,display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0",borderBottom:"0.5px solid #F3F4F6"},
-              div({},e("span",{style:{fontSize:13,fontWeight:600}},m),e("span",{style:{fontSize:11,color:"#9CA3AF",marginLeft:8}},"收"+fmtC(inc,base)+" 支"+fmtC(exp,base))),
-              e("span",{className:"tag",style:{background:settled?"#D1FAE5":fut?"#EDE9FE":hasBal?"#FEF3C7":"#F3F4F6",color:settled?"#065F46":fut?"#5B21B6":hasBal?"#92400E":"#9CA3AF"}},settled?"✓ 已结算":fut?"未来":hasBal?"待结算":"无余额"));
+        dv({position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:480,background:"rgba(255,255,255,0.96)",borderTop:"0.5px solid #F3F4F6",display:"flex",padding:"8px 0 16px"},
+          TABS.map(function(t){
+            return h("button",{key:t[0],onClick:function(){dp({t:"TAB",v:t[0]});},style:{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2,background:"none",padding:"4px 0"}},
+              h("span",{style:{fontSize:18,opacity:tab===t[0]?1:0.35}},t[1]),
+              h("span",{style:{fontSize:10,fontWeight:tab===t[0]?700:400,color:tab===t[0]?"#A855F7":"#9CA3AF"}},t[2]),
+              tab===t[0]&&dv({width:18,height:3,borderRadius:2,background:G,marginTop:1}));
           }))
-      ),
+      );
+    }
 
-      // SETTINGS
-      tab==="settings"&&div({},
-        div({className:"card",marginBottom:16,border:"1.5px solid #FFE4E6"},
-          e("p",{style:{fontWeight:700,marginBottom:6,color:"#F43F5E"}},"⚠️ 危险操作"),
-          e("p",{style:{fontSize:12,color:"#9CA3AF",marginBottom:12}},"清空所有记录、结算和设置，恢复初始状态，不可撤销。"),
-          e("button",{onClick:function(){dp({type:"CONFIRM_DEL",payload:{kind:"reset",label:"确定要清空所有数据吗？不可撤销！"}});},style:{width:"100%",padding:"11px",borderRadius:14,background:"#FFF1F2",color:"#F43F5E",fontWeight:700,fontSize:14,border:"1.5px solid #FECDD3"}},"🗑️ 清空所有数据，重新开始")),
-        div({className:"card",marginBottom:16},
-          e("p",{style:{fontWeight:700,marginBottom:6}},"默认汇率"),
-          e("p",{style:{fontSize:12,color:"#9CA3AF",marginBottom:12}},"影响新录入记录的默认值；每笔记录可单独修改"),
-          live&&div({display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",background:"#F3E8FF",borderRadius:12,marginBottom:10},
-            e("span",{style:{fontSize:13,color:"#7C3AED",fontWeight:600}},"实时 1 AUD = "+live+" CNY"),
-            e("button",{style:{background:"#C084FC",color:"#fff",borderRadius:10,padding:"6px 12px",fontSize:12,fontWeight:600},onClick:function(){dp({type:"UPDATE_SETUP",setup:Object.assign({},setup,{rate:Number(live)})});}},"使用")),
-          e(QuickRate,{setup:setup,dp:dp})),
-        e("p",{style:{fontWeight:700,fontSize:15,marginBottom:12}},"合伙人 & 货币"),
-        e(Setup,{existing:setup,onDone:function(s){dp({type:"UPDATE_SETUP",setup:s});}})
-      )
-    ),
+    ReactDOM.createRoot(document.getElementById("root")).render(h(App));
+  }
 
-    div({position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:480,background:"rgba(255,255,255,0.96)",borderTop:"0.5px solid #F3F4F6",display:"flex",padding:"8px 0 16px"},
-      TABS.map(function(t){
-        return e("button",{key:t[0],onClick:function(){dp({type:"SET_TAB",v:t[0]});},style:{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2,background:"none",padding:"4px 0"}},
-          e("span",{style:{fontSize:18,opacity:tab===t[0]?1:0.35}},t[1]),
-          e("span",{style:{fontSize:10,fontWeight:tab===t[0]?700:400,color:tab===t[0]?"#A855F7":"#9CA3AF"}},t[2]),
-          tab===t[0]&&div({width:18,height:3,borderRadius:2,background:G,marginTop:1}));
-      }))
-  );
-}
+  // Wait for scripts
+  var attempts = 0;
+  var iv = setInterval(function() {
+    attempts++;
+    if (window.React && window.ReactDOM) {
+      clearInterval(iv);
+      try { init(); }
+      catch(err) { document.getElementById("root").innerHTML = "<p style='padding:40px;color:red'>启动错误: "+err.message+"</p>"; }
+    } else if (attempts > 80) {
+      clearInterval(iv);
+      document.getElementById("root").innerHTML = "<p style='padding:40px;color:red'>依赖库加载超时，请刷新页面</p>";
+    }
+  }, 100);
 
-ReactDOM.createRoot(document.getElementById("root")).render(e(App));
-
-}); // waitForDeps
-})(); // IIFE
+})();
 </script>
 </body>
 </html>
