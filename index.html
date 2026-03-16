@@ -145,7 +145,38 @@ function getCapitalLoans(entries, partners, rate, mode, base) {
   return result;
 }
 
-function minTr(bal, partners) {
+// ── Merge profit transfers + loan transfers into net transfers ────────────────
+function mergeTransfers(profitTrs, loanTrs, partners) {
+  // Build a net balance map: positive = others owe you, negative = you owe others
+  var net = {};
+  partners.forEach(function(p) { net[p.id] = 0; });
+
+  profitTrs.forEach(function(t) {
+    net[t.from] -= t.amount; // payer
+    net[t.to]   += t.amount; // receiver
+  });
+  loanTrs.forEach(function(t) {
+    net[t.from] -= t.amount;
+    net[t.to]   += t.amount;
+  });
+
+  // Now run minTr on the merged net
+  var arr = partners.map(function(p) { return { id: p.id, name: p.name, bal: net[p.id] || 0 }; });
+  arr.sort(function(a, b) { return a.bal - b.bal; });
+  var tr = [], lo = 0, hi = arr.length - 1;
+  var a = arr.map(function(x) { return { id: x.id, name: x.name, bal: x.bal }; });
+  while (lo < hi) {
+    var d = a[lo], c = a[hi];
+    if (Math.abs(d.bal) < 0.005) { lo++; continue; }
+    if (Math.abs(c.bal) < 0.005) { hi--; continue; }
+    var amt = Math.min(-d.bal, c.bal);
+    if (amt > 0.005) tr.push({ from: d.id, fromName: d.name, to: c.id, toName: c.name, amount: amt });
+    d.bal += amt; c.bal -= amt;
+    if (Math.abs(d.bal) < 0.005) lo++;
+    if (Math.abs(c.bal) < 0.005) hi--;
+  }
+  return tr;
+}
   var arr = partners.map(function(p) { return { id: p.id, name: p.name, bal: bal[p.id] || 0 }; });
   arr.sort(function(a,b) { return a.bal - b.bal; });
   var tr = [], lo = 0, hi = arr.length - 1;
@@ -364,25 +395,25 @@ function EntryForm(props) {
   var rn = Number(eRate) || setup.rate;
   var preview = amt && cur !== setup.baseCurrency ? toBase(amt, cur, setup.baseCurrency, rn) : null;
 
-  function buildEntry() {
-    var sd = date.startsWith(month) ? date : month + "-01";
-    var ab = toBase(amt, cur, setup.baseCurrency, rn);
-    var base2 = { date: sd, month: month, amount: Number(amt), currency: cur, amountBase: ab, rateAtEntry: rn, baseCurrencyAtEntry: setup.baseCurrency, category: cat || "其他", paidBy: paidBy, note: note };
-    if (isC) {
-      // safety: ensure capitalTo is never the same as paidBy
-      var finalCapTo = capTo;
-      if (flow === "partner" && finalCapTo === paidBy) {
-        var others = setup.partners.filter(function(p) { return p.id !== paidBy; });
-        finalCapTo = others.length > 0 ? others[0].id : "";
-      }
-      return Object.assign({}, base2, { type: "capital", capitalFlow: flow, capitalTo: flow === "partner" ? finalCapTo : null });
-    }
-    return Object.assign({}, base2, { type: type });
-  }
   function submit() {
     if (!amt || !paidBy) return;
-    if (editing) { onUpdate(Object.assign({}, editing, buildEntry())); }
-    else { onAdd(buildEntry()); setAmt(""); setNote(""); setCat(""); }
+    // resolve the correct capitalTo right at submit time
+    var resolvedCapTo = capTo;
+    if (isC && flow === "partner") {
+      if (!resolvedCapTo || resolvedCapTo === paidBy) {
+        var others = setup.partners.filter(function(p) { return p.id !== paidBy; });
+        resolvedCapTo = others.length > 0 ? others[0].id : "";
+      }
+    }
+    function buildFinal() {
+      var sd = date.startsWith(month) ? date : month + "-01";
+      var ab = toBase(amt, cur, setup.baseCurrency, rn);
+      var base2 = { date: sd, month: month, amount: Number(amt), currency: cur, amountBase: ab, rateAtEntry: rn, baseCurrencyAtEntry: setup.baseCurrency, category: cat || "其他", paidBy: paidBy, note: note };
+      if (isC) return Object.assign({}, base2, { type: "capital", capitalFlow: flow, capitalTo: flow === "partner" ? resolvedCapTo : null });
+      return Object.assign({}, base2, { type: type });
+    }
+    if (editing) { onUpdate(Object.assign({}, editing, buildFinal())); }
+    else { onAdd(buildFinal()); setAmt(""); setNote(""); setCat(""); }
   }
 
   var accent = isI ? "#10B981" : isC ? "#F59E0B" : "#F472B6";
@@ -455,7 +486,7 @@ function SettleForm(props) {
   var bal = calcBal(relE, setup.partners, rate, rateMode, setup.baseCurrency);
   var profitTrs = minTr(bal, setup.partners);
   var loanTrs = getCapitalLoans(relE, setup.partners, rate, rateMode, setup.baseCurrency);
-  var trs = profitTrs.concat(loanTrs);
+  var trs = mergeTransfers(profitTrs, loanTrs, setup.partners);
 
   function toggle(m) { setSelM(function(p) { return p.indexOf(m) !== -1 ? p.filter(function(x) { return x !== m; }) : p.concat([m]); }); }
   function fa(key, sug) { var r = custom[key]; if (r === undefined || r === "") return sug; var n = Number(r); return (isNaN(n) || n < 0) ? sug : n; }
@@ -544,7 +575,9 @@ function App() {
   var tExp = mExp.reduce(function(s, x) { return s + resBase(x, cur, rateMode, base); }, 0);
   var net = tInc - tExp;
   var bal = useMemo(function() { return calcBal(mE, setup.partners, cur, rateMode, base); }, [mE, setup, cur, rateMode, base]);
-  var trs = useMemo(function() { return minTr(bal, setup.partners).concat(getCapitalLoans(mE, setup.partners, cur, rateMode, base)); }, [bal, mE, setup, cur, rateMode, base]);
+  var profitTrs = useMemo(function() { return minTr(bal, setup.partners); }, [bal, setup]);
+  var loanTrs = useMemo(function() { return getCapitalLoans(mE, setup.partners, cur, rateMode, base); }, [mE, setup, cur, rateMode, base]);
+  var trs = useMemo(function() { return mergeTransfers(profitTrs, loanTrs, setup.partners); }, [profitTrs, loanTrs, setup]);
   var settledMs = useMemo(function() { var s = {}; settlements.forEach(function(x) { (x.months || []).forEach(function(m) { s[m] = true; }); }); return s; }, [settlements]);
   var isSettled = !!settledMs[month], isFuture = month > thisMonth();
 
@@ -685,7 +718,9 @@ function App() {
                     ),
                     e("p", { style: { fontSize: 11, color: "#9CA3AF" } },
                       x.date + " · " + x.category + " · " + (setup.partners.find(function(p) { return p.id === x.paidBy; }) || { name: "—" }).name +
-                      (type === "capital" && x.capitalFlow === "partner" ? " → " + (setup.partners.find(function(p) { return p.id === x.capitalTo; }) || { name: "?" }).name : "")
+                      (type === "capital" && x.capitalFlow === "partner" && x.capitalTo && x.capitalTo !== x.paidBy
+                        ? " → " + (setup.partners.find(function(p) { return p.id === x.capitalTo; }) || { name: "?" }).name
+                        : "")
                     ),
                     x.note && e("p", { style: { fontSize: 11, color: "#9CA3AF", marginTop: 2, fontStyle: "italic" } }, '"' + x.note + '"')
                   ),
@@ -720,14 +755,63 @@ function App() {
               return div({ key: row[0], background: row[3], borderRadius: 14, padding: "10px 12px" }, e("p", { style: { fontSize: 11, color: row[2], fontWeight: 600, marginBottom: 3 } }, row[0]), e("p", { style: { fontSize: 13, fontWeight: 800, color: row[2], wordBreak: "break-all" } }, row[1]));
             })
           ),
+          // breakdown per partner
           setup.partners.map(function(p, i) {
             var b = bal[p.id] || 0, entitled = net * (p.ratio / 100);
-            return div({ key: p.id, display: "flex", alignItems: "center", gap: 10, padding: "10px 0", borderBottom: i < setup.partners.length - 1 ? "0.5px solid #F3F4F6" : "none" },
-              e(Avatar, { name: p.name, idx: i, size: 32 }),
-              div({ flex: 1 }, e("span", { style: { fontSize: 13, fontWeight: 600 } }, p.name), e("span", { style: { fontSize: 11, color: "#9CA3AF", marginLeft: 6 } }, "应得 " + fmtC(entitled, base))),
-              e("span", { style: { fontSize: 13, fontWeight: 700, color: b > 0.01 ? "#10B981" : b < -0.01 ? "#F43F5E" : "#9CA3AF" } }, b > 0.01 ? "↑ " + fmtC(b, base) : b < -0.01 ? "↓ " + fmtC(Math.abs(b), base) : "持平")
+            // loans involving this partner
+            var loansOut = loanTrs.filter(function(t) { return t.to === p.id; }); // others owe this partner
+            var loansIn  = loanTrs.filter(function(t) { return t.from === p.id; }); // this partner owes others
+            var totalLoanIn  = loansOut.reduce(function(s,t){return s+t.amount;},0);
+            var totalLoanOut = loansIn.reduce(function(s,t){return s+t.amount;},0);
+            return div({ key: p.id, background: "#F9FAFB", borderRadius: 14, padding: "12px 14px", marginBottom: 10 },
+              div({ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 },
+                e(Avatar, { name: p.name, idx: i, size: 28 }),
+                e("span", { style: { fontWeight: 700, fontSize: 14 } }, p.name),
+                e("span", { style: { fontSize: 11, color: "#9CA3AF" } }, p.ratio + "%")
+              ),
+              // profit row
+              div({ display: "flex", justifyContent: "space-between", marginBottom: 5 },
+                e("span", { style: { fontSize: 12, color: "#6B7280" } }, "利润应得"),
+                e("span", { style: { fontSize: 12, color: "#7C3AED", fontWeight: 600 } }, fmtC(entitled, base))
+              ),
+              // profit settlement adjustment
+              b !== 0 && div({ display: "flex", justifyContent: "space-between", marginBottom: 5 },
+                e("span", { style: { fontSize: 12, color: "#6B7280" } }, "收付差额（收入/支出垫付）"),
+                e("span", { style: { fontSize: 12, color: b > 0.01 ? "#10B981" : "#F43F5E", fontWeight: 600 } }, (b > 0 ? "+" : "") + fmtC(b, base))
+              ),
+              // loan rows
+              totalLoanIn > 0 && div({ display: "flex", justifyContent: "space-between", marginBottom: 5 },
+                e("span", { style: { fontSize: 12, color: "#6B7280" } }, "注资待收回"),
+                e("span", { style: { fontSize: 12, color: "#10B981", fontWeight: 600 } }, "+" + fmtC(totalLoanIn, base))
+              ),
+              totalLoanOut > 0 && div({ display: "flex", justifyContent: "space-between", marginBottom: 5 },
+                e("span", { style: { fontSize: 12, color: "#6B7280" } }, "注资待还款"),
+                e("span", { style: { fontSize: 12, color: "#F43F5E", fontWeight: 600 } }, "-" + fmtC(totalLoanOut, base))
+              ),
+              // divider
+              div({ borderTop: "0.5px solid #E5E7EB", margin: "8px 0" }),
+              // net
+              (function() {
+                var netAmt = entitled + b + totalLoanIn - totalLoanOut;
+                return div({ display: "flex", justifyContent: "space-between" },
+                  e("span", { style: { fontSize: 13, fontWeight: 700 } }, "最终"),
+                  e("span", { style: { fontSize: 13, fontWeight: 700, color: netAmt > 0.01 ? "#10B981" : netAmt < -0.01 ? "#F43F5E" : "#9CA3AF" } },
+                    netAmt > 0.01 ? "应收 " + fmtC(netAmt, base) : netAmt < -0.01 ? "应付 " + fmtC(Math.abs(netAmt), base) : "持平"
+                  )
+                );
+              })()
             );
           }),
+          // final transfer instructions
+          trs.length > 0 && div({ background: "#EDE9FE", borderRadius: 14, padding: "12px 14px", marginTop: 4, marginBottom: 12 },
+            e("p", { style: { fontSize: 12, color: "#7C3AED", fontWeight: 700, marginBottom: 8 } }, "💸 最终转账方案"),
+            trs.map(function(t, i) {
+              return div({ key: i, display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: i < trs.length - 1 ? "0.5px solid #DDD6FE" : "none" },
+                e("span", { style: { fontSize: 13, fontWeight: 600 } }, t.fromName + " → " + t.toName),
+                e("span", { style: { fontSize: 14, fontWeight: 700, color: "#7C3AED" } }, fmtC(t.amount, base))
+              );
+            })
+          ),
           isSettled && div({ marginTop: 14, padding: "10px 14px", background: "#D1FAE5", borderRadius: 12 },
             e("p", { style: { fontSize: 13, color: "#065F46", fontWeight: 700 } }, "✓ 本月已结算"),
             settlements.filter(function(x) { return (x.months || []).indexOf(month) !== -1; }).map(function(x) {
