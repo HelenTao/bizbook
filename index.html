@@ -341,7 +341,23 @@ function EntryForm(props) {
   var ps = useState(ed ? ed.paidBy : setup.partners[0] ? setup.partners[0].id : ""); var paidBy = ps[0]; var setPaidBy = ps[1];
   var ns = useState(ed ? ed.note || "" : ""); var note = ns[0]; var setNote = ns[1];
   var fs = useState(ed ? ed.capitalFlow || "partner" : "partner"); var flow = fs[0]; var setFlow = fs[1];
-  var cps = useState(ed ? ed.capitalTo || "" : (setup.partners[1] ? setup.partners[1].id : "")); var capTo = cps[0]; var setCapTo = cps[1];
+  // capTo must be different from paidBy — default to first partner that is NOT paidBy
+  var initCapTo = ed ? ed.capitalTo || "" : "";
+  if (!initCapTo) {
+    var initPaidBy = ed ? ed.paidBy : (setup.partners[0] ? setup.partners[0].id : "");
+    var otherP = setup.partners.filter(function(p) { return p.id !== initPaidBy; });
+    initCapTo = otherP.length > 0 ? otherP[0].id : "";
+  }
+  var cps = useState(initCapTo); var capTo = cps[0]; var setCapTo = cps[1];
+
+  // when paidBy changes, reset capTo if it's now the same person
+  function handleSetPaidBy(v) {
+    setPaidBy(v);
+    if (capTo === v) {
+      var other = setup.partners.filter(function(p) { return p.id !== v; });
+      if (other.length > 0) setCapTo(other[0].id);
+    }
+  }
 
   var iCats = ["销售收入","线上销售","退款回收","其他收入"];
   var eCats = ["进货","房租","人工","运费","水电","包装","营销","杂费"];
@@ -352,7 +368,15 @@ function EntryForm(props) {
     var sd = date.startsWith(month) ? date : month + "-01";
     var ab = toBase(amt, cur, setup.baseCurrency, rn);
     var base2 = { date: sd, month: month, amount: Number(amt), currency: cur, amountBase: ab, rateAtEntry: rn, baseCurrencyAtEntry: setup.baseCurrency, category: cat || "其他", paidBy: paidBy, note: note };
-    if (isC) return Object.assign({}, base2, { type: "capital", capitalFlow: flow, capitalTo: flow === "partner" ? capTo : null });
+    if (isC) {
+      // safety: ensure capitalTo is never the same as paidBy
+      var finalCapTo = capTo;
+      if (flow === "partner" && finalCapTo === paidBy) {
+        var others = setup.partners.filter(function(p) { return p.id !== paidBy; });
+        finalCapTo = others.length > 0 ? others[0].id : "";
+      }
+      return Object.assign({}, base2, { type: "capital", capitalFlow: flow, capitalTo: flow === "partner" ? finalCapTo : null });
+    }
     return Object.assign({}, base2, { type: type });
   }
   function submit() {
@@ -400,11 +424,15 @@ function EntryForm(props) {
           return e("button", { key: item[0], onClick: function() { setFlow(item[0]); }, style: { padding: "10px 14px", textAlign: "left", borderRadius: 12, background: flow === item[0] ? "#FEF3C7" : "#F3F4F6", color: flow === item[0] ? "#92400E" : "#6B7280", fontSize: 13, fontWeight: flow === item[0] ? 600 : 400, border: flow === item[0] ? "2px solid #F59E0B" : "2px solid transparent" } }, item[1]);
         })
       ),
-      flow === "partner" && div({}, e(Lbl, { t: "转给谁" }), e(Sel, { val: capTo, set: setCapTo, opts: setup.partners.filter(function(p) { return p.id !== paidBy; }).map(function(p) { return [p.id, p.name]; }) }))
+      flow === "partner" && div({}, e(Lbl, { t: "转给谁" }),
+        e(Sel, { val: capTo !== paidBy ? capTo : (setup.partners.filter(function(p){return p.id!==paidBy;})[0]||{id:""}).id,
+          set: setCapTo,
+          opts: setup.partners.filter(function(p) { return p.id !== paidBy; }).map(function(p) { return [p.id, p.name]; }) })
+      )
     ),
     div({ marginBottom: 12 },
       e(Lbl, { t: isC ? "注资人" : isI ? "收款人" : "付款人" }),
-      e(Sel, { val: paidBy, set: setPaidBy, opts: setup.partners.map(function(p) { return [p.id, p.name]; }) })
+      e(Sel, { val: paidBy, set: handleSetPaidBy, opts: setup.partners.map(function(p) { return [p.id, p.name]; }) })
     ),
     div({ marginBottom: 16 }, e(Lbl, { t: "备注" }), e(Inp, { val: note, set: setNote, ph: "可选" })),
     div({ display: "flex", gap: 10 },
