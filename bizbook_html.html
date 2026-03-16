@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>合伙生意记账</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;background:#F9FAFB;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
+  #root{max-width:480px;margin:0 auto;min-height:100vh;background:#fff;position:relative}
+  input,select{font-family:inherit;font-size:14px;background:#F3F4F6;color:#111827;border:none;border-radius:12px;padding:10px 14px;width:100%;outline:none;transition:box-shadow .15s}
+  input:focus,select:focus{box-shadow:0 0 0 2px #C084FC55}
+  select{cursor:pointer}
+  button{font-family:inherit;cursor:pointer;border:none;transition:transform .1s,opacity .15s}
+  button:active{transform:scale(0.97)}
+  .pill{display:flex;background:#F3F4F6;border-radius:20px;padding:3px;gap:2px}
+  .pill button{border-radius:17px;padding:5px 13px;font-size:12px;background:transparent;color:#6B7280}
+  .pill button.on{background:#fff;color:#A855F7;font-weight:600;box-shadow:0 1px 4px rgba(0,0,0,0.08)}
+  .chip{display:inline-block;padding:5px 13px;border-radius:20px;font-size:12px;background:#F3F4F6;color:#6B7280;cursor:pointer;transition:all .15s}
+  .chip.on{background:#F3E8FF;color:#9333EA;font-weight:600}
+  .card{background:#fff;border-radius:20px;padding:18px;box-shadow:0 2px 12px rgba(0,0,0,0.06)}
+  .row{display:flex;justify-content:space-between;align-items:center}
+  .tag{display:inline-block;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600}
+  .ghost{border:1.5px solid #E9D5FF;border-radius:12px;padding:9px 16px;background:transparent;color:#A855F7;font-size:13px;font-weight:500}
+  .ghost:hover{background:#FAF5FF}
+  .sec{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#9CA3AF;margin-bottom:10px}
+  .lbl{font-size:12px;color:#6B7280;margin-bottom:5px;font-weight:500}
+  .ibtn{background:none;color:#9CA3AF;padding:4px 8px;font-size:15px;border-radius:8px}
+  .ibtn:hover{color:#A855F7;background:#F3E8FF}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const {useState,useReducer,useMemo,useEffect,useCallback}=React;
+const {PieChart,Pie,Cell,BarChart,Bar,XAxis,YAxis,Tooltip,ResponsiveContainer}=Recharts;
+
+const PALETTE=["#C084FC","#F472B6","#FB923C","#34D399","#60A5FA","#FBBF24","#A78BFA","#F87171"];
+const G="linear-gradient(135deg,#C084FC,#F472B6)";
+const G2="linear-gradient(135deg,#818CF8,#C084FC)";
+const clamp=(n,mn,mx)=>Math.min(mx,Math.max(mn,n));
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+const today=()=>new Date().toISOString().slice(0,10);
+const thisMonth=()=>new Date().toISOString().slice(0,7);
+function genMonths(){const list=[],now=new Date();for(let i=-6;i<=6;i++){const d=new Date(now.getFullYear(),now.getMonth()+i,1);list.push(d.toISOString().slice(0,7));}return list;}
+const ALL_MONTHS=genMonths();
+const fmtN=(n,d=2)=>isNaN(n)?"0.00":Number(n).toFixed(d);
+const fmtC=(n,cur)=>cur==="AUD"?`A$${fmtN(n)}`:`¥${fmtN(n)}`;
+function toBase(amount,currency,base,rate){const a=Number(amount)||0;if(currency===base)return a;if(base==="CNY"&&currency==="AUD")return a*rate;if(base==="AUD"&&currency==="CNY")return a/rate;return a;}
+function resolveBase(e,rate,mode,base){if(mode==="historical")return e.amountBase;return toBase(e.amount,e.currency,base,rate);}
+
+const SK="bizbook_v5";
+function loadState(){try{const s=localStorage.getItem(SK);return s?JSON.parse(s):null;}catch{return null;}}
+function saveState(s){try{localStorage.setItem(SK,JSON.stringify(s));}catch{}}
+
+function calcBalances(entries,partners,rate,mode,base){
+  const op=entries.filter(e=>e.type!=="capital"&&e.type!=="settlement");
+  const totalInc=op.filter(e=>e.type==="income").reduce((s,e)=>s+resolveBase(e,rate,mode,base),0);
+  const totalExp=op.filter(e=>e.type==="expense").reduce((s,e)=>s+resolveBase(e,rate,mode,base),0);
+  const profit=totalInc-totalExp;
+  const held={};partners.forEach(p=>held[p.id]=0);
+  op.forEach(e=>{if(!e.paidBy||!held.hasOwnProperty(e.paidBy))return;const b=resolveBase(e,rate,mode,base);if(e.type==="income")held[e.paidBy]+=b;if(e.type==="expense")held[e.paidBy]-=b;});
+  entries.filter(e=>e.type==="capital").forEach(e=>{if(!e.paidBy||!held.hasOwnProperty(e.paidBy))return;const b=resolveBase(e,rate,mode,base);const flow=e.capitalFlow||"pool";if(flow==="pool")held[e.paidBy]-=b;else if(flow==="partner"){held[e.paidBy]-=b;if(e.capitalTo&&held.hasOwnProperty(e.capitalTo))held[e.capitalTo]+=b;}});
+  entries.filter(e=>e.type==="settlement").forEach(e=>{if(!e.fromId||!e.toId)return;const b=resolveBase(e,rate,mode,base);if(held.hasOwnProperty(e.fromId))held[e.fromId]+=b;if(held.hasOwnProperty(e.toId))held[e.toId]-=b;});
+  const bal={};partners.forEach(p=>{bal[p.id]=(profit*(p.ratio/100))-held[p.id];});return bal;
+}
+function minTransfers(bal,partners){
+  const arr=partners.map(p=>({id:p.id,name:p.name,bal:bal[p.id]||0})).sort((a,b)=>a.bal-b.bal);
+  const tr=[];let lo=0,hi=arr.length-1;const a=arr.map(x=>({...x}));
+  while(lo<hi){const d=a[lo],c=a[hi];if(Math.abs(d.bal)<0.005){lo++;continue;}if(Math.abs(c.bal)<0.005){hi--;continue;}const amt=Math.min(-d.bal,c.bal);if(amt>0.005)tr.push({from:d.id,fromName:d.name,to:c.id,toName:c.name,amount:amt});d.bal+=amt;c.bal-=amt;if(Math.abs(d.bal)<0.005)lo++;if(Math.abs(c.bal)<0.005)hi--;}
+  return tr;
+}
+
+function initApp(saved){
+  if(saved)return{...saved,confirmDel:null,showForm:null,editingEntry:null,showSettle:false,showMerge:false};
+  return{setup:null,month:thisMonth(),tab:"setup",rateMode:"historical",entries:[],settlements:[],confirmDel:null,showForm:null,editingEntry:null,showSettle:false,showMerge:false};
+}
+function reducer(s,a){
+  let n;
+  switch(a.type){
+    case "SETUP_DONE":n={...s,setup:a.setup,tab:"dashboard",showForm:null,editingEntry:null};break;
+    case "SET_TAB":n={...s,tab:a.v,showForm:null,editingEntry:null,showSettle:false,showMerge:false};break;
+    case "SET_MONTH":n={...s,month:a.v};break;
+    case "SET_RATE_MODE":n={...s,rateMode:a.v};break;
+    case "UPDATE_SETUP":n={...s,setup:a.setup};break;
+    case "SHOW_FORM":n={...s,showForm:a.v,editingEntry:null,showSettle:false,showMerge:false};break;
+    case "EDIT_ENTRY":n={...s,editingEntry:a.entry,showForm:a.entry.type,showSettle:false,showMerge:false};break;
+    case "ADD_ENTRY":n={...s,entries:[...s.entries,{...a.entry,id:uid()}],showForm:null,editingEntry:null};break;
+    case "UPDATE_ENTRY":n={...s,entries:s.entries.map(e=>e.id===a.entry.id?a.entry:e),showForm:null,editingEntry:null};break;
+    case "DEL_ENTRY":n={...s,entries:s.entries.filter(e=>e.id!==a.id),confirmDel:null};break;
+    case "ADD_SETTLEMENT":n={...s,settlements:[...s.settlements,{...a.settlement,id:uid()}],entries:[...s.entries,...a.se],showSettle:false,showMerge:false};break;
+    case "DEL_SETTLEMENT":{const linked=s.settlements.find(x=>x.id===a.id)?.linkedEntryIds||[];n={...s,settlements:s.settlements.filter(x=>x.id!==a.id),entries:s.entries.filter(e=>!linked.includes(e.id)),confirmDel:null};break;}
+    case "CONFIRM_DEL":n={...s,confirmDel:a.payload};break;
+    case "CANCEL_DEL":n={...s,confirmDel:null};break;
+    case "RESET":localStorage.removeItem(SK);return initApp(null);
+    case "SHOW_SETTLE":n={...s,showSettle:a.v,showForm:null,editingEntry:null,showMerge:false};break;
+    case "SHOW_MERGE":n={...s,showMerge:a.v,showForm:null,editingEntry:null,showSettle:false};break;
+    default:return s;
+  }
+  saveState(n);return n;
+}
+
+const Lbl=({t})=><p className="lbl">{t}</p>;
+function Inp({val,set,type="text",ph="",style={}}){return <input type={type} value={val} placeholder={ph} onChange={e=>set(e.target.value)} style={style}/>;}
+function Sel({val,set,opts}){return <select value={val} onChange={e=>set(e.target.value)}>{opts.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select>;}
+function CurToggle({val,set}){return <div className="pill">{[["CNY","¥ CNY"],["AUD","A$ AUD"]].map(([v,l])=><button key={v} className={val===v?"on":""} onClick={()=>set(v)}>{l}</button>)}</div>;}
+function RateToggle({val,set}){return <div className="pill">{[["historical","历史汇率"],["current","当前汇率"]].map(([v,l])=><button key={v} className={val===v?"on":""} onClick={()=>set(v)}>{l}</button>)}</div>;}
+
+function Avatar({name,idx=0,size=36}){
+  const c=PALETTE[idx%PALETTE.length];
+  return <div style={{width:size,height:size,borderRadius:"50%",background:c,display:"flex",alignItems:"center",justifyContent:"center",fontSize:size*.38,fontWeight:700,color:"#fff",flexShrink:0,boxShadow:`0 2px 8px ${c}55`}}>{(name||"?").slice(0,1).toUpperCase()}</div>;
+}
+
+function GradientBtn({children,onClick,style={},g=G}){
+  return <button onClick={onClick} style={{background:g,color:"#fff",borderRadius:14,padding:"11px 20px",fontWeight:600,fontSize:14,boxShadow:"0 4px 14px rgba(192,132,252,0.35)",...style}}>{children}</button>;
+}
+
+function ConfirmDlg({msg,onOk,onCancel}){
+  return(
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.4)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:999,padding:"0 16px 32px"}}>
+      <div style={{background:"#fff",borderRadius:24,padding:24,width:"100%",maxWidth:420}}>
+        <p style={{fontSize:15,marginBottom:20,textAlign:"center"}}>{msg}</p>
+        <div style={{display:"flex",gap:10}}>
+          <button className="ghost" style={{flex:1}} onClick={onCancel}>取消</button>
+          <button style={{flex:1,background:"linear-gradient(135deg,#F87171,#FB923C)",color:"#fff",borderRadius:12,padding:"10px",fontWeight:600,fontSize:14}} onClick={onOk}>确认</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PartnerStep({partners,resize,up,total,ok,onNext,onBack}){
+  return(
+    <div style={{width:"100%",maxWidth:380}}>
+      <p style={{fontSize:20,fontWeight:700,marginBottom:4}}>合伙人</p>
+      <p style={{fontSize:13,color:"#6B7280",marginBottom:18}}>姓名和持股比例，合计需为100%</p>
+      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:16}}>
+        <p style={{fontSize:13,color:"#6B7280"}}>人数</p>
+        <button className="ghost" style={{padding:"4px 12px"}} onClick={()=>resize(partners.length-1)}>−</button>
+        <span style={{fontWeight:700,minWidth:20,textAlign:"center"}}>{partners.length}</span>
+        <button className="ghost" style={{padding:"4px 12px"}} onClick={()=>resize(partners.length+1)}>+</button>
+      </div>
+      {partners.map((p,i)=>(
+        <div key={p.id} style={{display:"flex",gap:10,marginBottom:10,alignItems:"center"}}>
+          <Avatar name={p.name||String(i+1)} idx={i} size={36}/>
+          <input value={p.name} placeholder={`合伙人 ${i+1}`} onChange={e=>up(p.id,"name",e.target.value)} style={{flex:2,padding:"10px 14px",borderRadius:12,border:"none",background:"#F3F4F6",fontSize:14}}/>
+          <input type="number" value={p.ratio} onChange={e=>up(p.id,"ratio",e.target.value)} style={{width:60,padding:"10px 8px",borderRadius:12,border:"none",background:"#F3F4F6",fontSize:14,textAlign:"center"}}/>
+          <span style={{fontSize:13,color:"#6B7280"}}>%</span>
+        </div>
+      ))}
+      <p style={{fontSize:12,color:total===100?"#10B981":"#F87171",marginTop:6,marginBottom:20,fontWeight:600}}>合计 {total}% {total===100?"✓":"（需等于100%）"}</p>
+      <div style={{display:"flex",gap:10}}>
+        {onBack&&<button className="ghost" style={{flex:1}} onClick={onBack}>上一步</button>}
+        <GradientBtn style={{flex:2,padding:12}} onClick={()=>ok&&onNext()} g={ok?G:"linear-gradient(135deg,#D1D5DB,#9CA3AF)"}>下一步</GradientBtn>
+      </div>
+    </div>
+  );
+}
+
+function CurrencyStep({base,setBase,rate,setRate,liveRate,onDone,onBack}){
+  return(
+    <div style={{width:"100%",maxWidth:380}}>
+      <p style={{fontSize:20,fontWeight:700,marginBottom:4}}>货币 & 汇率</p>
+      <p style={{fontSize:13,color:"#6B7280",marginBottom:18}}>主要结算货币和默认汇率</p>
+      <div style={{marginBottom:16}}>
+        <Lbl t="主要结算货币"/>
+        <div style={{display:"flex",gap:10}}>
+          {[["CNY","人民币 ¥"],["AUD","澳币 A$"]].map(([v,l])=>(
+            <button key={v} onClick={()=>setBase(v)} style={{flex:1,padding:"12px",borderRadius:14,background:base===v?G:"#F3F4F6",color:base===v?"#fff":"#6B7280",fontWeight:base===v?700:400,fontSize:14,boxShadow:base===v?"0 4px 12px rgba(192,132,252,0.3)":"none"}}>{l}</button>
+          ))}
+        </div>
+      </div>
+      <div style={{marginBottom:20}}>
+        <Lbl t="默认汇率（1 AUD = ? CNY）"/>
+        {liveRate&&(
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",background:"#F3E8FF",borderRadius:12,marginBottom:8}}>
+            <span style={{fontSize:13,color:"#7C3AED",fontWeight:500}}>实时 1 AUD = {liveRate} CNY</span>
+            <button className="ghost" style={{padding:"4px 10px",fontSize:12}} onClick={()=>setRate(liveRate)}>使用</button>
+          </div>
+        )}
+        <input type="number" value={rate} placeholder="4.70" onChange={e=>setRate(e.target.value)} style={{background:"#F3F4F6",border:"none",borderRadius:12,padding:"10px 14px",fontSize:14,width:"100%"}}/>
+      </div>
+      <div style={{display:"flex",gap:10}}>
+        {onBack&&<button className="ghost" style={{flex:1}} onClick={onBack}>上一步</button>}
+        <GradientBtn style={{flex:2,padding:12}} onClick={onDone}>{onBack?"开始使用":"保存"}</GradientBtn>
+      </div>
+    </div>
+  );
+}
+
+function Setup({onDone,existing}){
+  const [step,setStep]=useState(0);
+  const [partners,setPartners]=useState(existing?.partners||[{id:uid(),name:"",ratio:50},{id:uid(),name:"",ratio:50}]);
+  const [base,setBase]=useState(existing?.baseCurrency||"CNY");
+  const [rate,setRate]=useState(String(existing?.rate||4.70));
+  const [liveRate,setLiveRate]=useState(null);
+  useEffect(()=>{fetch("https://api.frankfurter.app/latest?from=AUD&to=CNY").then(r=>r.json()).then(d=>{if(d?.rates?.CNY)setLiveRate(Number(d.rates.CNY).toFixed(4));}).catch(()=>{});},[]);
+  const total=partners.reduce((s,p)=>s+Number(p.ratio||0),0);
+  const up=(id,f,v)=>setPartners(ps=>ps.map(p=>p.id===id?{...p,[f]:v}:p));
+  const resize=n=>{const count=clamp(n,2,8);const b=Math.floor(100/count),rem=100-b*(count-1);setPartners(Array.from({length:count},(_,i)=>({id:partners[i]?.id||uid(),name:partners[i]?.name||"",ratio:i===count-1?rem:b})));};
+  const ok=partners.every(p=>p.name.trim())&&total===100;
+  const done=()=>onDone({partners,baseCurrency:base,rate:Number(rate)||4.7});
+
+  if(!existing) return(
+    <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"24px 20px",background:"#fff"}}>
+      {step===0&&(
+        <div style={{width:"100%",maxWidth:380,textAlign:"center"}}>
+          <div style={{width:72,height:72,borderRadius:22,background:G,display:"flex",alignItems:"center",justifyContent:"center",fontSize:34,margin:"0 auto 20px",boxShadow:"0 8px 24px rgba(192,132,252,0.4)"}}>🤝</div>
+          <p style={{fontSize:26,fontWeight:700,marginBottom:8}}>合伙生意记账</p>
+          <p style={{fontSize:14,color:"#6B7280",marginBottom:32,lineHeight:1.6}}>澳洲华人合伙小生意<br/>多人分账 · 双币种 · 灵活结算</p>
+          <GradientBtn style={{width:"100%",padding:14,fontSize:15,borderRadius:16}} onClick={()=>setStep(1)}>开始设置</GradientBtn>
+        </div>
+      )}
+      {step===1&&<PartnerStep partners={partners} resize={resize} up={up} total={total} ok={ok} onNext={()=>setStep(2)} onBack={()=>setStep(0)}/>}
+      {step===2&&<CurrencyStep base={base} setBase={setBase} rate={rate} setRate={setRate} liveRate={liveRate} onDone={done} onBack={()=>setStep(1)}/>}
+    </div>
+  );
+  return(
+    <div>
+      {step===0&&<PartnerStep partners={partners} resize={resize} up={up} total={total} ok={ok} onNext={()=>setStep(1)} onBack={null}/>}
+      {step===1&&<CurrencyStep base={base} setBase={setBase} rate={rate} setRate={setRate} liveRate={liveRate} onDone={done} onBack={()=>setStep(0)}/>}
+    </div>
+  );
+}
+
+function EntryForm({type,month,setup,onAdd,onCancel,editing,onUpdate}){
+  const isIncome=type==="income",isCapital=type==="capital",ed=editing;
+  const [date,setDate]=useState(ed?.date||month+"-01");
+  const [amt,setAmt]=useState(ed?String(ed.amount):"");
+  const [cur,setCur]=useState(ed?.currency||setup.baseCurrency);
+  const [eRate,setERate]=useState(String(ed?.rateAtEntry||setup.rate));
+  const [cat,setCat]=useState(ed?.category||"");
+  const [paidBy,setPaidBy]=useState(ed?.paidBy||setup.partners[0]?.id||"");
+  const [note,setNote]=useState(ed?.note||"");
+  const [flow,setFlow]=useState(ed?.capitalFlow||"partner");
+  const [capTo,setCapTo]=useState(ed?.capitalTo||setup.partners[1]?.id||"");
+  const incomeCats=["销售收入","线上销售","退款回收","其他收入"];
+  const expenseCats=["进货","房租","人工","运费","水电","包装","营销","杂费"];
+  const rn=Number(eRate)||setup.rate;
+  const preview=amt&&cur!==setup.baseCurrency?toBase(amt,cur,setup.baseCurrency,rn):null;
+  const build=()=>{
+    const sd=date.startsWith(month)?date:month+"-01";
+    const ab=toBase(amt,cur,setup.baseCurrency,rn);
+    const base2={date:sd,month,amount:Number(amt),currency:cur,amountBase:ab,rateAtEntry:rn,baseCurrencyAtEntry:setup.baseCurrency,category:cat||"其他",paidBy,note};
+    return isCapital?{...base2,type:"capital",capitalFlow:flow,capitalTo:flow==="partner"?capTo:null}:{...base2,type};
+  };
+  const submit=()=>{if(!amt||!paidBy)return;if(editing)onUpdate({...editing,...build()});else{onAdd(build());setAmt("");setNote("");setCat("");}};
+  const accent=isIncome?"#10B981":isCapital?"#F59E0B":"#F472B6";
+  const accentLight=isIncome?"#D1FAE5":isCapital?"#FEF3C7":"#FCE7F3";
+  const title=editing?(isIncome?"编辑收入":isCapital?"编辑注资":"编辑支出"):(isIncome?"录入收入":isCapital?"录入注资":"录入支出");
+  return(
+    <div style={{background:"#fff",borderRadius:20,padding:18,marginBottom:14,boxShadow:"0 2px 16px rgba(0,0,0,0.07)"}}>
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16}}>
+        <div style={{width:36,height:36,borderRadius:10,background:accentLight,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>{isIncome?"💰":isCapital?"🏦":"🛍️"}</div>
+        <p style={{fontWeight:700,fontSize:15,color:accent}}>{title}</p>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+        <div><Lbl t="日期"/><Inp val={date} set={setDate} type="date"/></div>
+        <div><Lbl t="货币"/><CurToggle val={cur} set={setCur}/></div>
+      </div>
+      <div style={{marginBottom:12}}><Lbl t={`金额 (${cur==="CNY"?"¥":"A$"})`}/><Inp val={amt} set={setAmt} type="number" ph="0.00"/></div>
+      <div style={{background:"#F3E8FF",borderRadius:14,padding:12,marginBottom:12}}>
+        <Lbl t="本笔汇率（1 AUD = ? CNY）"/>
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          <input type="number" value={eRate} placeholder={String(setup.rate)} onChange={e=>setERate(e.target.value)} style={{flex:1,padding:"9px 12px",borderRadius:10,border:"none",background:"#fff",fontSize:14}}/>
+          <button style={{background:"#C084FC",color:"#fff",borderRadius:10,padding:"9px 12px",fontSize:12,fontWeight:600,whiteSpace:"nowrap"}} onClick={()=>setERate(String(setup.rate))}>默认</button>
+        </div>
+        {preview&&<p style={{fontSize:11,color:"#7C3AED",marginTop:6,fontWeight:500}}>≈ {fmtC(preview,setup.baseCurrency)}</p>}
+      </div>
+      {!isCapital&&(
+        <div style={{marginBottom:12}}>
+          <Lbl t="分类"/>
+          <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:8}}>{(isIncome?incomeCats:expenseCats).map(c=><span key={c} className={`chip${cat===c?" on":""}`} onClick={()=>setCat(cat===c?"":c)}>{c}</span>)}</div>
+          <Inp val={cat} set={setCat} ph="自定义分类..."/>
+        </div>
+      )}
+      {isCapital&&(
+        <div style={{marginBottom:12}}>
+          <Lbl t="资金流向"/>
+          <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:10}}>
+            {[["partner","👤 转给另一合伙人"],["pool","🏦 进入公账"],["self","💼 自持备用金"]].map(([v,l])=>(
+              <button key={v} onClick={()=>setFlow(v)} style={{padding:"10px 14px",textAlign:"left",borderRadius:12,background:flow===v?"#FEF3C7":"#F3F4F6",color:flow===v?"#92400E":"#6B7280",fontSize:13,fontWeight:flow===v?600:400,border:flow===v?"2px solid #F59E0B":"2px solid transparent"}}>{l}</button>
+            ))}
+          </div>
+          {flow==="partner"&&<div><Lbl t="转给谁"/><Sel val={capTo} set={setCapTo} opts={setup.partners.filter(p=>p.id!==paidBy).map(p=>[p.id,p.name])}/></div>}
+        </div>
+      )}
+      <div style={{marginBottom:12}}><Lbl t={isCapital?"注资人":isIncome?"收款人":"付款人"}/><Sel val={paidBy} set={setPaidBy} opts={setup.partners.map(p=>[p.id,p.name])}/></div>
+      <div style={{marginBottom:16}}><Lbl t="备注"/><Inp val={note} set={setNote} ph="可选"/></div>
+      <div style={{display:"flex",gap:10}}>
+        <GradientBtn style={{flex:2,padding:11}} onClick={submit}>{editing?"保存修改":"确认添加"}</GradientBtn>
+        <button className="ghost" style={{flex:1}} onClick={onCancel}>取消</button>
+      </div>
+    </div>
+  );
+}
+
+function SettleForm({allEntries,setup,isMulti,defaultMonths,onAdd,onCancel,rate,rateMode}){
+  const candidates=useMemo(()=>ALL_MONTHS.filter(m=>m<=thisMonth()&&allEntries.some(e=>e.month===m&&e.type!=="settlement")),[allEntries]);
+  const [selMonths,setSelMonths]=useState(isMulti?candidates:defaultMonths||[]);
+  const [date,setDate]=useState(today());
+  const [note,setNote]=useState("");
+  const [custom,setCustom]=useState({});
+  const relEntries=useMemo(()=>allEntries.filter(e=>selMonths.includes(e.month)),[allEntries,selMonths]);
+  const bal=useMemo(()=>calcBalances(relEntries,setup.partners,rate,rateMode,setup.baseCurrency),[relEntries,setup.partners,rate,rateMode,setup.baseCurrency]);
+  const transfers=useMemo(()=>minTransfers(bal,setup.partners),[bal,setup.partners]);
+  const toggle=m=>setSelMonths(p=>p.includes(m)?p.filter(x=>x!==m):[...p,m]);
+  const finalAmt=(key,sug)=>{const r=custom[key];if(r===undefined||r==="")return sug;const n=Number(r);return isNaN(n)||n<0?sug:n;};
+  const submit=()=>{
+    if(!selMonths.length)return;
+    const linkedIds=[];
+    const se=transfers.map(t=>{const key=t.from+t.to,amt=finalAmt(key,t.amount),eid=uid();linkedIds.push(eid);return{id:eid,date,month:selMonths[selMonths.length-1],type:"settlement",amount:amt,currency:setup.baseCurrency,amountBase:amt,rateAtEntry:rate,baseCurrencyAtEntry:setup.baseCurrency,fromId:t.from,fromName:t.fromName,toId:t.to,toName:t.toName,category:"结算",note,suggestedAmount:t.amount};});
+    onAdd({months:[...selMonths].sort(),date,transfers:se.map(e=>({...e})),note,rate,linkedEntryIds:linkedIds},se);
+  };
+  return(
+    <div style={{background:"#fff",borderRadius:20,padding:18,marginBottom:14,boxShadow:"0 2px 16px rgba(0,0,0,0.07)"}}>
+      <p style={{fontWeight:700,fontSize:15,color:"#7C3AED",marginBottom:14}}>{isMulti?"🔗 合并结算":"✅ 月度结算"}</p>
+      <div style={{marginBottom:12}}>
+        <Lbl t={isMulti?"选择月份":"结算月份"}/>
+        <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+          {candidates.map(m=><span key={m} className={`chip${selMonths.includes(m)?" on":""}`} onClick={()=>toggle(m)}>{m}</span>)}
+          {!candidates.length&&<p style={{fontSize:12,color:"#9CA3AF"}}>暂无可结算月份</p>}
+        </div>
+      </div>
+      {selMonths.length>0&&transfers.length>0&&(
+        <div style={{background:"#F3E8FF",borderRadius:14,padding:14,marginBottom:12}}>
+          <p style={{fontSize:12,color:"#7C3AED",fontWeight:600,marginBottom:10}}>建议方案 · {selMonths.length}个月</p>
+          {transfers.map(t=>{const key=t.from+t.to;return(
+            <div key={key} style={{marginBottom:12}}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+                <span style={{fontSize:13,fontWeight:600}}>{t.fromName} <span style={{color:"#A78BFA"}}>→</span> {t.toName}</span>
+                <span style={{fontSize:12,color:"#7C3AED"}}>建议 {fmtC(t.amount,setup.baseCurrency)}</span>
+              </div>
+              <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                <input type="number" placeholder={fmtN(t.amount)} value={custom[key]??""} onChange={e=>setCustom(p=>({...p,[key]:e.target.value}))} style={{flex:1,padding:"8px 12px",borderRadius:10,border:"none",background:"#fff",fontSize:13}}/>
+                <span style={{fontSize:12,color:"#7C3AED",whiteSpace:"nowrap"}}>{setup.baseCurrency}</span>
+              </div>
+              <p style={{fontSize:11,color:"#A78BFA",marginTop:4}}>实际：{fmtC(finalAmt(key,t.amount),setup.baseCurrency)}</p>
+            </div>
+          );})}
+        </div>
+      )}
+      {selMonths.length>0&&transfers.length===0&&<div style={{textAlign:"center",padding:14,background:"#F3F4F6",borderRadius:14,marginBottom:12}}><p style={{fontSize:13,color:"#6B7280"}}>所选月份无未清余额 🎉</p></div>}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+        <div><Lbl t="结算日期"/><Inp val={date} set={setDate} type="date"/></div>
+        <div><Lbl t="备注"/><Inp val={note} set={setNote} ph="可选"/></div>
+      </div>
+      <div style={{display:"flex",gap:10}}>
+        <GradientBtn style={{flex:2,padding:11}} onClick={submit}>确认结算</GradientBtn>
+        <button className="ghost" style={{flex:1}} onClick={onCancel}>取消</button>
+      </div>
+    </div>
+  );
+}
+
+function QuickRate({setup,dispatch}){
+  const [r,setR]=useState(String(setup.rate));
+  return(
+    <div style={{display:"flex",gap:8}}>
+      <input type="number" value={r} placeholder={String(setup.rate)} onChange={e=>setR(e.target.value)} style={{flex:1,padding:"10px 14px",borderRadius:12,border:"none",background:"#F3F4F6",fontSize:14}}/>
+      <GradientBtn onClick={()=>{const n=Number(r);if(n>0)dispatch({type:"UPDATE_SETUP",setup:{...setup,rate:n}});}}>更新</GradientBtn>
+    </div>
+  );
+}
+
+function App(){
+  const saved=useMemo(()=>loadState(),[]);
+  const [state,dispatch]=useReducer(reducer,saved,initApp);
+  const {setup,month,tab,rateMode,entries,settlements,confirmDel,showForm,editingEntry,showSettle,showMerge}=state;
+  const [liveRate,setLiveRate]=useState(null);
+  useEffect(()=>{fetch("https://api.frankfurter.app/latest?from=AUD&to=CNY").then(r=>r.json()).then(d=>{if(d?.rates?.CNY)setLiveRate(Number(d.rates.CNY).toFixed(4));}).catch(()=>{});},[]);
+
+  const cur=setup?.rate||4.7,base=setup?.baseCurrency||"CNY";
+  const monthEntries=useMemo(()=>entries.filter(e=>e.month===month),[entries,month]);
+  const mInc=monthEntries.filter(e=>e.type==="income"),mExp=monthEntries.filter(e=>e.type==="expense"),mCap=monthEntries.filter(e=>e.type==="capital");
+  const totalInc=mInc.reduce((s,e)=>s+resolveBase(e,cur,rateMode,base),0);
+  const totalExp=mExp.reduce((s,e)=>s+resolveBase(e,cur,rateMode,base),0);
+  const net=totalInc-totalExp;
+  const bal=useMemo(()=>setup?calcBalances(monthEntries,setup.partners,cur,rateMode,base):{},[monthEntries,setup,cur,rateMode,base]);
+  const transfers=useMemo(()=>setup?minTransfers(bal,setup.partners):[],[bal,setup]);
+  const settledMonths=useMemo(()=>{const s=new Set();settlements.forEach(x=>(x.months||[]).forEach(m=>s.add(m)));return s;},[settlements]);
+  const isSettled=settledMonths.has(month),isFuture=month>thisMonth();
+  const catData=useMemo(()=>{const c={};mExp.forEach(e=>{c[e.category]=(c[e.category]||0)+resolveBase(e,cur,rateMode,base);});return Object.entries(c).map(([name,value])=>({name,value}));},[mExp,cur,rateMode,base]);
+  const barData=useMemo(()=>ALL_MONTHS.map(m=>({m:m.slice(5),收入:entries.filter(e=>e.month===m&&e.type==="income").reduce((s,e)=>s+resolveBase(e,cur,rateMode,base),0),支出:entries.filter(e=>e.month===m&&e.type==="expense").reduce((s,e)=>s+resolveBase(e,cur,rateMode,base),0),})).filter(x=>x.收入>0||x.支出>0),[entries,cur,rateMode,base]);
+
+  if(!setup) return <Setup onDone={s=>dispatch({type:"SETUP_DONE",setup:s})}/>;
+
+  const TABS=[["dashboard","⬡","主页"],["record","✦","记录"],["settle","◎","结算"],["history","≡","历史"],["settings","⊙","设置"]];
+
+  return(
+    <div style={{maxWidth:480,margin:"0 auto",paddingBottom:80,background:"#F9FAFB",minHeight:"100vh"}}>
+      {confirmDel&&<ConfirmDlg msg={confirmDel.label||"确认删除？"} onCancel={()=>dispatch({type:"CANCEL_DEL"})} onOk={()=>{if(confirmDel.kind==="entry")dispatch({type:"DEL_ENTRY",id:confirmDel.id});else if(confirmDel.kind==="settlement")dispatch({type:"DEL_SETTLEMENT",id:confirmDel.id});else if(confirmDel.kind==="reset")dispatch({type:"RESET"});}}/>}
+
+      <div style={{background:"#fff",padding:"20px 18px 0",boxShadow:"0 1px 0 #F3F4F6"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14}}>
+          <div>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:2}}>
+              <div style={{width:32,height:32,borderRadius:10,background:G,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>🤝</div>
+              <p style={{fontWeight:700,fontSize:16}}>合伙记账</p>
+            </div>
+            <p style={{fontSize:11,color:"#9CA3AF"}}>{setup.partners.map(p=>`${p.name} ${p.ratio}%`).join("  ·  ")}</p>
+          </div>
+          <div style={{textAlign:"right"}}>
+            <p style={{fontSize:11,color:liveRate?"#7C3AED":"#9CA3AF",fontWeight:liveRate?600:400}}>{liveRate?`💱 ${liveRate}`:"获取汇率中"}</p>
+            <p style={{fontSize:10,color:"#9CA3AF"}}>默认 {setup.rate}</p>
+          </div>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
+          <select value={month} onChange={e=>dispatch({type:"SET_MONTH",v:e.target.value})} style={{flex:1,padding:"10px 14px",borderRadius:14,background:"#F3F4F6",border:"none",fontSize:13,fontWeight:500}}>
+            {ALL_MONTHS.map(m=><option key={m} value={m}>{m}{m>thisMonth()?" 🔮":""}</option>)}
+          </select>
+          {isSettled&&<span className="tag" style={{background:"#D1FAE5",color:"#065F46"}}>✓ 已结算</span>}
+          {isFuture&&<span className="tag" style={{background:"#EDE9FE",color:"#5B21B6"}}>未来</span>}
+        </div>
+        <div style={{display:"flex"}}>
+          {TABS.map(([id,icon,label])=>(
+            <button key={id} onClick={()=>dispatch({type:"SET_TAB",v:id})} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2,background:"none",padding:"6px 0",borderBottom:tab===id?"2px solid #A855F7":"2px solid transparent"}}>
+              <span style={{fontSize:16,opacity:tab===id?1:0.35}}>{icon}</span>
+              <span style={{fontSize:10,fontWeight:tab===id?700:400,color:tab===id?"#A855F7":"#9CA3AF"}}>{label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div style={{padding:"16px 16px"}}>
+        {tab==="dashboard"&&(
+          <div>
+            <div style={{background:G,borderRadius:24,padding:"20px",marginBottom:16,color:"#fff",boxShadow:"0 8px 24px rgba(192,132,252,0.35)"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
+                <div>
+                  <p style={{fontSize:11,opacity:.8,marginBottom:4,fontWeight:500}}>净利润 · {month}</p>
+                  <p style={{fontSize:30,fontWeight:800,letterSpacing:"-0.5px"}}>{fmtC(net,base)}</p>
+                </div>
+                <RateToggle val={rateMode} set={v=>dispatch({type:"SET_RATE_MODE",v})}/>
+              </div>
+              <div style={{display:"flex"}}>
+                <div style={{flex:1,borderRight:"1px solid rgba(255,255,255,0.25)",paddingRight:16}}>
+                  <p style={{fontSize:11,opacity:.7,marginBottom:2}}>收入</p>
+                  <p style={{fontSize:16,fontWeight:700}}>{fmtC(totalInc,base)}</p>
+                </div>
+                <div style={{flex:1,paddingLeft:16}}>
+                  <p style={{fontSize:11,opacity:.7,marginBottom:2}}>支出</p>
+                  <p style={{fontSize:16,fontWeight:700}}>{fmtC(totalExp,base)}</p>
+                </div>
+              </div>
+            </div>
+            <div className="card" style={{marginBottom:14}}>
+              <p className="sec">各人结算差额</p>
+              {setup.partners.map((p,i)=>{const b=bal[p.id]||0,entitled=net*(p.ratio/100);return(
+                <div key={p.id} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 0",borderBottom:i<setup.partners.length-1?"0.5px solid #F3F4F6":"none"}}>
+                  <Avatar name={p.name} idx={i} size={38}/>
+                  <div style={{flex:1}}>
+                    <p style={{fontSize:13,fontWeight:600}}>{p.name} <span style={{fontWeight:400,color:"#9CA3AF",fontSize:12}}>{p.ratio}%</span></p>
+                    <p style={{fontSize:11,color:"#9CA3AF"}}>应得 {fmtC(entitled,base)}</p>
+                  </div>
+                  <div style={{textAlign:"right"}}>
+                    <p style={{fontSize:13,fontWeight:700,color:b>0.01?"#10B981":b<-0.01?"#F43F5E":"#9CA3AF"}}>{b>0.01?"↑ 应收":b<-0.01?"↓ 应付":"持平"}</p>
+                    {Math.abs(b)>0.01&&<p style={{fontSize:12,color:"#6B7280"}}>{fmtC(Math.abs(b),base)}</p>}
+                  </div>
+                </div>
+              );})}
+            </div>
+            {transfers.length>0&&(
+              <div className="card" style={{marginBottom:14,background:"linear-gradient(135deg,#FFF7ED,#FEF3C7)"}}>
+                <p className="sec" style={{color:"#92400E"}}>💸 本月待结算</p>
+                {transfers.map((t,i)=>(
+                  <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:i<transfers.length-1?"0.5px solid rgba(251,191,36,0.3)":"none"}}>
+                    <span style={{fontSize:13,fontWeight:500,color:"#78350F"}}>{t.fromName} <span style={{color:"#F59E0B"}}>→</span> {t.toName}</span>
+                    <span style={{fontWeight:700,fontSize:14,color:"#D97706"}}>{fmtC(t.amount,base)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {barData.length>0&&(
+              <div className="card" style={{marginBottom:14}}>
+                <p className="sec">收支趋势</p>
+                <ResponsiveContainer width="100%" height={140}>
+                  <BarChart data={barData} margin={{top:0,right:0,left:-20,bottom:0}}>
+                    <XAxis dataKey="m" tick={{fontSize:10,fill:"#9CA3AF"}} axisLine={false} tickLine={false}/>
+                    <YAxis tick={{fontSize:10,fill:"#9CA3AF"}} axisLine={false} tickLine={false}/>
+                    <Tooltip contentStyle={{background:"#fff",border:"none",borderRadius:12,boxShadow:"0 4px 16px rgba(0,0,0,0.1)",fontSize:12}}/>
+                    <Bar dataKey="收入" fill="#C084FC" radius={[6,6,0,0]}/>
+                    <Bar dataKey="支出" fill="#F472B6" radius={[6,6,0,0]}/>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+            {catData.length>0&&(
+              <div className="card">
+                <p className="sec">支出构成</p>
+                <ResponsiveContainer width="100%" height={150}>
+                  <PieChart>
+                    <Pie data={catData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={58} innerRadius={28} label={({name,percent})=>`${name} ${(percent*100).toFixed(0)}%`} labelLine={false} fontSize={10}>
+                      {catData.map((_,i)=><Cell key={i} fill={PALETTE[i%PALETTE.length]}/>)}
+                    </Pie>
+                    <Tooltip formatter={v=>fmtC(v,base)} contentStyle={{background:"#fff",border:"none",borderRadius:12,boxShadow:"0 4px 16px rgba(0,0,0,0.1)",fontSize:12}}/>
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </div>
+        )}
+
+        {tab==="record"&&(
+          <div>
+            <div style={{display:"flex",gap:8,marginBottom:14}}>
+              {[["income","💰 收入","#10B981"],["expense","🛍️ 支出","#F472B6"],["capital","🏦 注资","#F59E0B"]].map(([t,l,c])=>(
+                <button key={t} onClick={()=>dispatch({type:"SHOW_FORM",v:showForm===t&&!editingEntry?null:t})} style={{flex:1,padding:"11px 6px",borderRadius:14,background:showForm===t&&!editingEntry?c:"#F3F4F6",color:showForm===t&&!editingEntry?"#fff":c,fontSize:12,fontWeight:700,boxShadow:showForm===t&&!editingEntry?`0 4px 12px ${c}55`:"none"}}>{l}</button>
+              ))}
+            </div>
+            {showForm&&["income","expense","capital"].includes(showForm)&&(
+              <EntryForm type={showForm} month={month} setup={setup} editing={editingEntry}
+                onAdd={e=>dispatch({type:"ADD_ENTRY",entry:e})}
+                onUpdate={e=>dispatch({type:"UPDATE_ENTRY",entry:e})}
+                onCancel={()=>dispatch({type:"SHOW_FORM",v:null})}/>
+            )}
+            {[["income","💰 收入",mInc,"#10B981"],["capital","🏦 注资",mCap,"#F59E0B"],["expense","🛍️ 支出",mExp,"#F472B6"]].map(([type,label,list,c])=>(
+              list.length>0&&(
+                <div key={type} style={{marginBottom:16}}>
+                  <p className="sec">{label}</p>
+                  {list.map(e=>{const rb=resolveBase(e,cur,rateMode,base);return(
+                    <div key={e.id} style={{background:"#fff",borderRadius:16,padding:"12px 14px",marginBottom:8,boxShadow:"0 1px 8px rgba(0,0,0,0.05)"}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+                        <div style={{flex:1}}>
+                          <div style={{display:"flex",alignItems:"baseline",gap:6,flexWrap:"wrap",marginBottom:3}}>
+                            <span style={{fontWeight:700,fontSize:16,color:c}}>{fmtC(e.amount,e.currency)}</span>
+                            {e.currency!==base&&<span style={{fontSize:11,color:"#9CA3AF"}}>≈{fmtC(rb,base)}</span>}
+                            <span style={{fontSize:10,background:"#F3E8FF",color:"#7C3AED",borderRadius:6,padding:"1px 5px",fontWeight:600}}>@{e.rateAtEntry}</span>
+                          </div>
+                          <p style={{fontSize:11,color:"#9CA3AF"}}>{e.date} · <span style={{background:"#F3F4F6",borderRadius:6,padding:"1px 6px"}}>{e.category}</span> · {setup.partners.find(p=>p.id===e.paidBy)?.name||"—"}{type==="capital"&&e.capitalFlow==="partner"&&<span style={{color:"#A78BFA"}}> → {setup.partners.find(p=>p.id===e.capitalTo)?.name||"?"}</span>}</p>
+                          {e.note&&<p style={{fontSize:11,color:"#9CA3AF",marginTop:2,fontStyle:"italic"}}>"{e.note}"</p>}
+                        </div>
+                        <div style={{display:"flex",gap:2,marginLeft:8}}>
+                          <button className="ibtn" onClick={()=>dispatch({type:"EDIT_ENTRY",entry:e})}>✎</button>
+                          <button className="ibtn" style={{color:"#F87171"}} onClick={()=>dispatch({type:"CONFIRM_DEL",payload:{kind:"entry",id:e.id,label:`删除此记录？`}})}>×</button>
+                        </div>
+                      </div>
+                    </div>
+                  );})}
+                </div>
+              )
+            ))}
+            {monthEntries.filter(e=>e.type!=="settlement").length===0&&!showForm&&(
+              <div style={{textAlign:"center",padding:"40px 0"}}><p style={{fontSize:32,marginBottom:10}}>✨</p><p style={{fontSize:14,color:"#9CA3AF"}}>本月暂无记录</p></div>
+            )}
+          </div>
+        )}
+
+        {tab==="settle"&&(
+          <div>
+            <div style={{display:"flex",gap:10,marginBottom:14}}>
+              {[["SHOW_SETTLE","settle","✅ 月度结算",showSettle],["SHOW_MERGE","merge","🔗 合并结算",showMerge]].map(([act,key,label,active])=>(
+                <button key={key} onClick={()=>dispatch({type:act,v:!active})} style={{flex:1,padding:"12px",borderRadius:16,background:active?G2:"#F3F4F6",color:active?"#fff":"#6B7280",fontSize:13,fontWeight:600,boxShadow:active?"0 4px 14px rgba(129,140,248,0.35)":"none"}}>{label}</button>
+              ))}
+            </div>
+            {showSettle&&<SettleForm allEntries={entries} setup={setup} isMulti={false} defaultMonths={[month]} rate={cur} rateMode={rateMode} onAdd={(s,se)=>dispatch({type:"ADD_SETTLEMENT",settlement:s,se})} onCancel={()=>dispatch({type:"SHOW_SETTLE",v:false})}/>}
+            {showMerge&&<SettleForm allEntries={entries} setup={setup} isMulti={true} defaultMonths={null} rate={cur} rateMode={rateMode} onAdd={(s,se)=>dispatch({type:"ADD_SETTLEMENT",settlement:s,se})} onCancel={()=>dispatch({type:"SHOW_MERGE",v:false})}/>}
+            <div className="card">
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+                <p style={{fontWeight:700,fontSize:15}}>{month} 结算单</p>
+                <RateToggle val={rateMode} set={v=>dispatch({type:"SET_RATE_MODE",v})}/>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}}>
+                {[["收入",fmtC(totalInc,base),"#10B981","#D1FAE5"],["支出",fmtC(totalExp,base),"#F43F5E","#FFE4E6"],["净利润",fmtC(net,base),net>=0?"#7C3AED":"#F43F5E",net>=0?"#EDE9FE":"#FFE4E6"]].map(([l,v,c,bg])=>(
+                  <div key={l} style={{background:bg,borderRadius:14,padding:"10px 12px"}}><p style={{fontSize:11,color:c,fontWeight:600,marginBottom:3}}>{l}</p><p style={{fontSize:13,fontWeight:800,color:c,wordBreak:"break-all"}}>{v}</p></div>
+                ))}
+              </div>
+              {setup.partners.map((p,i)=>{const b=bal[p.id]||0,entitled=net*(p.ratio/100);return(
+                <div key={p.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 0",borderBottom:i<setup.partners.length-1?"0.5px solid #F3F4F6":"none"}}>
+                  <Avatar name={p.name} idx={i} size={32}/>
+                  <div style={{flex:1}}><span style={{fontSize:13,fontWeight:600}}>{p.name}</span><span style={{fontSize:11,color:"#9CA3AF",marginLeft:6}}>应得 {fmtC(entitled,base)}</span></div>
+                  <span style={{fontSize:13,fontWeight:700,color:b>0.01?"#10B981":b<-0.01?"#F43F5E":"#9CA3AF"}}>{b>0.01?"↑ "+fmtC(b,base):b<-0.01?"↓ "+fmtC(Math.abs(b),base):"持平"}</span>
+                </div>
+              );})}
+              {isSettled&&(
+                <div style={{marginTop:14,padding:"10px 14px",background:"#D1FAE5",borderRadius:12}}>
+                  <p style={{fontSize:13,color:"#065F46",fontWeight:700}}>✓ 本月已结算</p>
+                  {settlements.filter(x=>(x.months||[]).includes(month)).map(x=>(
+                    <p key={x.id} style={{fontSize:11,color:"#047857",marginTop:2}}>{x.date}{x.months.length>1?` · 合并(${x.months.length}月)`:""}{x.note?" · "+x.note:""}</p>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {tab==="history"&&(
+          <div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+              <p style={{fontWeight:700,fontSize:15}}>结算记录</p>
+              <RateToggle val={rateMode} set={v=>dispatch({type:"SET_RATE_MODE",v})}/>
+            </div>
+            {settlements.length===0?(
+              <div style={{textAlign:"center",padding:"40px 0"}}><p style={{fontSize:32,marginBottom:10}}>📋</p><p style={{color:"#9CA3AF",fontSize:14}}>暂无结算记录</p></div>
+            ):[...settlements].reverse().map(s=>(
+              <div key={s.id} className="card" style={{marginBottom:12}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
+                  <div>
+                    <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}>
+                      <span className="tag" style={{background:"#D1FAE5",color:"#065F46"}}>{(s.months||[]).length>1?`合并 ${s.months.length}月`:"月结"}</span>
+                      <span style={{fontSize:12,color:"#9CA3AF"}}>{s.date}</span>
+                      <span style={{fontSize:10,background:"#F3E8FF",color:"#7C3AED",borderRadius:6,padding:"1px 5px",fontWeight:600}}>@{s.rate}</span>
+                    </div>
+                    <p style={{fontSize:11,color:"#9CA3AF"}}>{(s.months||[]).join("  ·  ")}</p>
+                  </div>
+                  <button className="ibtn" style={{color:"#F87171"}} onClick={()=>dispatch({type:"CONFIRM_DEL",payload:{kind:"settlement",id:s.id,label:"撤销此结算？关联流水将一并删除"}})}>×</button>
+                </div>
+                {(s.transfers||[]).map((t,i)=>(
+                  <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"8px 0",borderTop:"0.5px solid #F3F4F6"}}>
+                    <span style={{fontSize:13}}>{t.fromName} <span style={{color:"#A78BFA"}}>→</span> {t.toName}</span>
+                    <span style={{fontWeight:700,fontSize:13,color:"#7C3AED"}}>{fmtC(resolveBase(t,cur,rateMode,base),base)}</span>
+                  </div>
+                ))}
+              </div>
+            ))}
+            <div style={{marginTop:6}}>
+              <p style={{fontWeight:700,fontSize:15,marginBottom:12}}>各月状态</p>
+              {ALL_MONTHS.filter(m=>entries.some(e=>e.month===m&&e.type!=="settlement")||settledMonths.has(m)).map(m=>{
+                const inc=entries.filter(e=>e.month===m&&e.type==="income").reduce((s,e)=>s+resolveBase(e,cur,rateMode,base),0);
+                const exp=entries.filter(e=>e.month===m&&e.type==="expense").reduce((s,e)=>s+resolveBase(e,cur,rateMode,base),0);
+                const settled=settledMonths.has(m),fut=m>thisMonth();
+                const me=entries.filter(e=>e.month===m);
+                const hasBal=!settled&&me.some(e=>e.type!=="settlement")&&minTransfers(calcBalances(me,setup.partners,cur,rateMode,base),setup.partners).some(t=>t.amount>0.05);
+                return(
+                  <div key={m} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0",borderBottom:"0.5px solid #F3F4F6"}}>
+                    <div><span style={{fontSize:13,fontWeight:600}}>{m}</span><span style={{fontSize:11,color:"#9CA3AF",marginLeft:8}}>收{fmtC(inc,base)} 支{fmtC(exp,base)}</span></div>
+                    <span className="tag" style={{background:settled?"#D1FAE5":fut?"#EDE9FE":hasBal?"#FEF3C7":"#F3F4F6",color:settled?"#065F46":fut?"#5B21B6":hasBal?"#92400E":"#9CA3AF"}}>
+                      {settled?"✓ 已结算":fut?"未来":hasBal?"待结算":"无余额"}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {tab==="settings"&&(
+          <div>
+            <div className="card" style={{marginBottom:16,border:"1.5px solid #FFE4E6"}}>
+              <p style={{fontWeight:700,marginBottom:6,color:"#F43F5E"}}>⚠️ 危险操作</p>
+              <p style={{fontSize:12,color:"#9CA3AF",marginBottom:12}}>清空所有记录、结算和设置，恢复初始状态。不可撤销。</p>
+              <button onClick={()=>dispatch({type:"CONFIRM_DEL",payload:{kind:"reset",label:"确定要清空所有数据吗？此操作无法撤销！"}})} style={{width:"100%",padding:"11px",borderRadius:14,background:"#FFF1F2",color:"#F43F5E",fontWeight:700,fontSize:14,border:"1.5px solid #FECDD3"}}>🗑️ 清空所有数据，重新开始</button>
+            </div>
+            <div className="card" style={{marginBottom:16}}>
+              <p style={{fontWeight:700,marginBottom:6}}>默认汇率</p>
+              <p style={{fontSize:12,color:"#9CA3AF",marginBottom:12}}>影响新录入记录的默认值；每笔记录可单独修改</p>
+              {liveRate&&(
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",background:"#F3E8FF",borderRadius:12,marginBottom:10}}>
+                  <span style={{fontSize:13,color:"#7C3AED",fontWeight:600}}>实时 1 AUD = {liveRate} CNY</span>
+                  <button style={{background:"#C084FC",color:"#fff",borderRadius:10,padding:"6px 12px",fontSize:12,fontWeight:600}} onClick={()=>dispatch({type:"UPDATE_SETUP",setup:{...setup,rate:Number(liveRate)}})}>使用</button>
+                </div>
+              )}
+              <QuickRate setup={setup} dispatch={dispatch}/>
+            </div>
+            <p style={{fontWeight:700,fontSize:15,marginBottom:12}}>合伙人 & 货币</p>
+            <Setup existing={setup} onDone={s=>dispatch({type:"UPDATE_SETUP",setup:s})}/>
+          </div>
+        )}
+      </div>
+
+      <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:480,background:"rgba(255,255,255,0.95)",borderTop:"0.5px solid #F3F4F6",display:"flex",padding:"8px 0 16px"}}>
+        {TABS.map(([id,icon,label])=>(
+          <button key={id} onClick={()=>dispatch({type:"SET_TAB",v:id})} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2,background:"none",padding:"4px 0"}}>
+            <span style={{fontSize:18,filter:tab===id?"none":"grayscale(1)",opacity:tab===id?1:0.35}}>{icon}</span>
+            <span style={{fontSize:10,fontWeight:tab===id?700:400,color:tab===id?"#A855F7":"#9CA3AF"}}>{label}</span>
+            {tab===id&&<div style={{width:18,height:3,borderRadius:2,background:G,marginTop:1}}/>}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const root=ReactDOM.createRoot(document.getElementById("root"));
+root.render(<App/>);
+</script>
+</body>
+</html>
