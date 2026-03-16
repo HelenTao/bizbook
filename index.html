@@ -744,7 +744,7 @@ function App(){
           e("p",{style:{fontSize:12,color:"#9CA3AF",marginBottom:12}},"影响新录入记录的默认值；每笔记录可单独修改"),
           live&&div({display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",background:"#F3E8FF",borderRadius:12,marginBottom:10},
             e("span",{style:{fontSize:13,color:"#7C3AED",fontWeight:600}},"实时 1 AUD = "+live+" CNY"),
-            e("button",{style:{background:"#C084FC",color:"#fff",borderRadius:10,padding:"6px 12px",fontSize:12,fontWeight:600},onClick:function(){dp({type:"UPDATE_SETUP",setup:Object.assign({},setup,{rate:Number(live)});});}},"使用")),
+            e("button",{style:{background:"#C084FC",color:"#fff",borderRadius:10,padding:"6px 12px",fontSize:12,fontWeight:600},onClick:function(){dp({type:"UPDATE_SETUP",setup:Object.assign({},setup,{rate:Number(live)})});}},"使用")),
           e(QuickRate,{setup:setup,dp:dp})),
         e("p",{style:{fontWeight:700,fontSize:15,marginBottom:12}},"合伙人 & 货币"),
         e(Setup,{existing:setup,onDone:function(s){dp({type:"UPDATE_SETUP",setup:s});}})
