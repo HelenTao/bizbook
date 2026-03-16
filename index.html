@@ -94,31 +94,18 @@ function calcBal(entries,partners,rate,mode,base){
   const profit=inc-exp;
   const held={};
   partners.forEach(p=>held[p.id]=0);
-  // income & expense
   op.forEach(x=>{
     if(!x.paidBy||!held.hasOwnProperty(x.paidBy))return;
     const b=resBase(x,rate,mode,base);
     if(x.type==="income")held[x.paidBy]+=b;
     if(x.type==="expense")held[x.paidBy]-=b;
   });
-  // capital flows
-  entries.filter(x=>x.type==="capital").forEach(x=>{
+  // pool capital: A paid into shared pool, A is owed back proportionally
+  entries.filter(x=>x.type==="capital"&&(x.capitalFlow||"pool")==="pool").forEach(x=>{
     if(!x.paidBy||!held.hasOwnProperty(x.paidBy))return;
-    const b=resBase(x,rate,mode,base);
-    const f=x.capitalFlow||"pool";
-    if(f==="pool"){
-      // A paid into shared pool → A is out of pocket, owed back proportionally
-      held[x.paidBy]-=b;
-    } else if(f==="partner"&&x.capitalTo&&held.hasOwnProperty(x.capitalTo)){
-      // A paid B directly → treated like A gave B cash in advance
-      // A's held decreases (paid out), B's held increases (received)
-      // This means at settlement: A is owed more, B owes more — net effect is A's payment to B is reduced
-      held[x.paidBy]-=b;
-      held[x.capitalTo]+=b;
-    }
-    // "self" = no effect until actually spent as an expense
+    held[x.paidBy]-=resBase(x,rate,mode,base);
   });
-  // past settlement entries offset held
+  // settlement entries offset held
   entries.filter(x=>x.type==="settlement").forEach(x=>{
     if(!x.fromId||!x.toId)return;
     const b=resBase(x,rate,mode,base);
@@ -128,6 +115,30 @@ function calcBal(entries,partners,rate,mode,base){
   const bal={};
   partners.forEach(p=>{bal[p.id]=(profit*(p.ratio/100))-held[p.id];});
   return bal;
+}
+
+// Extract direct partner loans (A→B) as extra transfers on top of profit balances
+function getCapitalLoans(entries,partners,rate,mode,base){
+  // key: "borrowerId_lenderId" (B_A) -> amount B owes A
+  entries.filter(x=>x.type==="capital"&&x.capitalFlow==="partner"&&x.paidBy&&x.capitalTo).forEach(x=>{
+    const b=resBase(x,rate,mode,base);
+    const key=x.capitalTo+"_"+x.paidBy; // B_A
+    loans[key]=(loans[key]||0)+b;
+  });
+  entries.filter(x=>x.type==="settlement"&&x.isLoanRepayment).forEach(x=>{
+    const b=resBase(x,rate,mode,base);
+    const key=x.fromId+"_"+x.toId; // B_A
+    loans[key]=(loans[key]||0)-b;
+  });
+  return Object.entries(loans)
+    .map(([key,amt])=>{
+      const [borrowerId,lenderId]=key.split("_");
+      const fromName=partners.find(p=>p.id===borrowerId)?.name||"?"; // B pays
+      const toName=partners.find(p=>p.id===lenderId)?.name||"?";     // A receives
+      return {from:borrowerId,fromName,to:lenderId,toName,amount:amt,isLoan:true};
+      // B owes A: "from" = B (debtor), "to" = A (creditor)
+    })
+    .filter(x=>x.amount>0.005);
 }
 
 function minTr(bal,partners){
@@ -440,7 +451,12 @@ function App(){
   const tExp=mExp.reduce((s,x)=>s+resBase(x,cur,rateMode,base),0);
   const net=tInc-tExp;
   const bal=useMemo(()=>setup?calcBal(mE,setup.partners,cur,rateMode,base):{},[mE,setup,cur,rateMode,base]);
-  const trs=useMemo(()=>setup?minTr(bal,setup.partners):[],[bal,setup]);
+  const trs=useMemo(()=>{
+    if(!setup)return[];
+    const profitTrs=minTr(bal,setup.partners);
+    const loanTrs=getCapitalLoans(mE,setup.partners,cur,rateMode,base);
+    return[...profitTrs,...loanTrs];
+  },[bal,mE,setup,cur,rateMode,base]);
   const settledMs=useMemo(()=>{const s=new Set();settlements.forEach(x=>(x.months||[]).forEach(m=>s.add(m)));return s;},[settlements]);
   const isSettled=settledMs.has(month),isFuture=month>thisMonth();
   const catData=useMemo(()=>{const c={};mExp.forEach(x=>{c[x.category]=(c[x.category]||0)+resBase(x,cur,rateMode,base);});return Object.entries(c).map(([name,value])=>({name,value}));},[mExp,cur,rateMode,base]);
@@ -527,7 +543,7 @@ function App(){
         trs.length>0&&d({className:"card",marginBottom:14,background:"linear-gradient(135deg,#FFF7ED,#FEF3C7)"},
           e("p",{className:"sec",style:{color:"#92400E"}},"💸 本月待结算"),
           ...trs.map((t,i)=>d({key:i,display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:i<trs.length-1?"0.5px solid rgba(251,191,36,0.3)":"none"},
-            e("span",{style:{fontSize:13,fontWeight:500,color:"#78350F"}},`${t.fromName} → ${t.toName}`),
+            e("span",{style:{fontSize:13,fontWeight:500,color:"#78350F"}},`${t.fromName} → ${t.toName}`,t.isLoan&&e("span",{style:{fontSize:10,background:"#FEF3C7",color:"#92400E",borderRadius:6,padding:"1px 6px",marginLeft:6,fontWeight:600}},"注资还款")),
             e("span",{style:{fontWeight:700,fontSize:14,color:"#D97706"}},fmtC(t.amount,base))
           ))
         ),
