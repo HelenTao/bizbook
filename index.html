@@ -560,9 +560,10 @@ button{font-family:'DM Sans',sans-serif;cursor:pointer;border:none;}
 
     // ── App ────────────────────────────────────────────────────────────────────
     function App() {
-      var saved=useMemo(function(){return lsLoad();},[]);
-      var r=useReducer(red,saved,initSt),st=r[0],dp=r[1];
+      var r=useReducer(red,null,function(){return initSt(lsLoad());}),st=r[0],dp=r[1];
       var lv=useState(null),live=lv[0],setLive=lv[1];
+      var ri=useState(""),rateInput=ri[0],setRateInput=ri[1];
+      var ri=useState(""),rateInput=ri[0],setRateInput=ri[1];
       useEffect(function(){
         fetch("https://api.frankfurter.app/latest?from=AUD&to=CNY")
           .then(function(x){return x.json();})
@@ -828,15 +829,19 @@ button{font-family:'DM Sans',sans-serif;cursor:pointer;border:none;}
               live&&dv({display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",background:"var(--gold-light)",borderRadius:"var(--radius)",marginBottom:10,border:"1px solid var(--paper3)"},
                 h("span",{style:{fontSize:12,color:"var(--gold)",fontFamily:"'Space Mono',monospace",fontWeight:700}},"实时  1 AUD = "+live+" CNY"),
                 h("button",{style:{background:"var(--gold)",color:"var(--white)",borderRadius:"var(--radius)",padding:"6px 12px",fontSize:11,fontWeight:700,fontFamily:"'Space Mono',monospace"},onClick:function(){dp({t:"UPS",v:Object.assign({},setup,{rate:+live})});}},"使用")),
-              (function(){
-                var qr=useState(String(setup.rate)),qv=qr[0],setQv=qr[1];
-                return dv({display:"flex",gap:8},
-                  h("input",{type:"number",value:qv,placeholder:String(setup.rate),onChange:function(ev){setQv(ev.target.value);},style:{flex:1,padding:"10px 14px",borderRadius:"var(--radius)",border:"1px solid var(--paper3)",background:"var(--paper)",fontSize:13,fontFamily:"'Space Mono',monospace"}}),
-                  h(PriBtn,{onClick:function(){var n=+qv;if(n>0)dp({t:"UPS",v:Object.assign({},setup,{rate:n})});},sx:{padding:"10px 16px",fontSize:13}},"更新"));
-              })()),
+              dv({display:"flex",gap:8},
+                  h("input",{type:"number",value:rateInput||String(setup.rate),placeholder:String(setup.rate),onChange:function(ev){setRateInput(ev.target.value);},style:{flex:1,padding:"10px 14px",borderRadius:"var(--radius)",border:"1px solid var(--paper3)",background:"var(--paper)",fontSize:13,fontFamily:"'Space Mono',monospace"}}),
+                  h(PriBtn,{onClick:function(){var n=+rateInput;if(n>0){dp({t:"UPS",v:Object.assign({},setup,{rate:n})});setRateInput("");}},sx:{padding:"10px 16px",fontSize:13}},"更新"))),
             dv({className:"card",marginBottom:16},
               h("p",{style:{fontWeight:700,marginBottom:12,fontFamily:"'Noto Serif SC',serif"}},"合伙人 & 货币"),
-              h(Setup,{ex:setup,onDone:function(v){dp({t:"UPS",v:v});}})),
+              h("p",{style:{fontSize:12,color:"var(--ink3)",marginBottom:12}},"合伙人共 "+setup.partners.length+" 人"),
+              setup.partners.map(function(p,i){
+                return dv({key:p.id,display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderBottom:i<setup.partners.length-1?"1px solid var(--paper2)":"none"},
+                  h(Avatar,{n:p.name,i:i,sz:28}),
+                  h("span",{style:{fontSize:13,flex:1}},""+p.name),
+                  h("span",{style:{fontSize:12,fontFamily:"'Space Mono',monospace",color:"var(--ink3)"}},p.ratio+"%"));
+              }),
+              h("p",{style:{fontSize:11,color:"var(--ink4)",marginTop:10}},"如需修改合伙人或比例，请清空数据后重新设置。")),
             dv({className:"card",border:"1px solid #F5DDDD"},
               h("p",{style:{fontWeight:700,marginBottom:4,color:"var(--red)",fontFamily:"'Noto Serif SC',serif"}},"危险区域"),
               h("p",{style:{fontSize:11,color:"var(--ink3)",marginBottom:12}},"清空所有数据，不可撤销"),
