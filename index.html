@@ -199,10 +199,11 @@ button{font-family:'DM Sans',sans-serif;cursor:pointer;border:none;}
       if (!GAS_URL) return;
       clearTimeout(lsSave._t);
       lsSave._t = setTimeout(function() {
-        // Use GET with encoded value to avoid CORS preflight (OPTIONS) block
-        var encoded = encodeURIComponent(JSON.stringify(s));
-        fetch(GAS_URL + "?action=save&key=" + encodeURIComponent(SK) + "&value=" + encoded)
-          .catch(function() {});
+        fetch(GAS_URL, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain" },
+          body: JSON.stringify({ action: "save", key: SK, value: JSON.stringify(s) })
+        }).catch(function() {});
       }, 1500);
     }
 
